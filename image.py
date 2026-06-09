@@ -10,4 +10,6 @@ core_duet_image = (
     )
     .uv_pip_install(*cfg.packages)
     .add_local_python_source("image", "duet")
+    .add_local_file("config/image.yaml", "/root/config/image.yaml")
+    .add_local_file("config/infra.yaml", "/root/config/infra.yaml")
 )
