@@ -1,0 +1,7 @@
+volume_name: "duet-volume"
+
+mlflow:
+  app_name: "ml-flow-tracking"
+  port: 5000
+  mount_path: "/data"
+  backend_store_uri: "sqlite:////data/duet.db"

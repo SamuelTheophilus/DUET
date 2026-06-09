@@ -9,4 +9,6 @@ wheels/
 # Virtual environments
 .venv
 config/.yaml_configs/api_keys.yaml
+config/infra.yaml
+config/image.yaml
 .env

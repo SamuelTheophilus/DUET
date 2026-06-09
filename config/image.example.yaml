@@ -1,0 +1,9 @@
+base_registry: "verlai/verl:vllm017.dev3"
+verl_commit_tag: "v0.8.0"
+packages:
+  - "bitsandbytes==0.49.1"
+  - "transformers==5.10.2"
+  - "accelerate==1.13.0"
+  - "datasets==5.0.0"
+  - "mlflow==3.12.0"
+  - "fastapi[standard]"
