@@ -12,7 +12,7 @@ DARK_GREY='\033[90m'   # Darker Grey
 REQUIRED_ACTION="${BOLD}${CYAN}[ACTION REQUIRED] Please press Enter to continue...${RESET}"
 
 printf "
-Setting up requirements for Duet.
+Setting up requirements for DUET.
 
 ${BOLD}${YELLOW}Note:${RESET} You will need to take action at various points during this installation.
 Before each step that requires your input, a prompt will appear on screen.
@@ -24,14 +24,14 @@ ${REQUIRED_ACTION}
 "
 # STEPS
 printf "
-${BOLD}Duet set up will require the following steps.${RESET}
+${BOLD}DUET setup will require the following steps.${RESET}
 "
 echo ""
 
-STEP_ONE="Install all necessary libraries required for DUET"
-STEP_TWO="Create all .gitignored files needed to run the repo"
-STEP_THREE="Set up modal workspace."
-STEP_FOUR="Run test script to verify modal setup is accessible from local terminal."
+STEP_ONE="Install all dependencies for DUET"
+STEP_TWO="Generate local config files from example templates"
+STEP_THREE="Set up your Modal workspace"
+STEP_FOUR="Verify the Modal GPU container and image"
 STEP_FIVE="Next steps..."
 STEPS=("$STEP_ONE" "$STEP_TWO" "$STEP_THREE" "$STEP_FOUR" "$STEP_FIVE")
 count=1
@@ -49,7 +49,7 @@ ${BOLD}${GREEN} STAGE ONE: ${STEP_ONE}.. $RESET
 
 "
 echo ""
-echo  "... Detecting if virtual environment is present."
+echo "Checking for an active virtual environment..."
 
 virtual_env_status="Not Active"
 
@@ -61,11 +61,11 @@ fi
 
 
 if [ "$virtual_env_status" == "Not Active" ]; then
-	echo "    ❌ Virtual Environment hasn't been instantiated."
-	echo "    Kindly activate the virtual environment to continue"
+	echo "    ❌ No active virtual environment detected."
+	echo "    Please activate your virtual environment and re-run this script."
 	exit 1
 else
-	echo "    ✔️ Virtual environment is present. Installation will begin soon."
+	echo "    ✔️ Virtual environment detected. Proceeding with installation."
 fi
 
 
@@ -101,7 +101,7 @@ else
     exit 1
 fi
 
-echo "    Libray installation is complete."
+echo "    Library installation complete."
 
 
 
@@ -110,7 +110,7 @@ echo "    Libray installation is complete."
 printf "
 
 $BOLD$GREEN STAGE TWO: ${STEP_TWO}.. $RESET
-This will create two yaml files (${DARK_GREY}infra.yaml${RESET} & ${DARK_GREY}image.yaml${RESET}) inside your ${DARK_GREY}config/${RESET} needed to run the container of the duet repo.
+This will copy ${DARK_GREY}infra.yaml${RESET} and ${DARK_GREY}image.yaml${RESET} into ${DARK_GREY}config/${RESET} from their example templates. Both files are required to build the DUET container.
 
 $REQUIRED_ACTION
 
@@ -141,19 +141,19 @@ printf "
 $BOLD$GREEN STAGE THREE: ${STEP_THREE}.. $RESET
 "
 
-printf "  i.$BOLD Check if modal is present $RESET"
+printf "  i.$BOLD Checking if Modal is installed... $RESET"
 echo ""
-python3 -c "import modal" 2>/dev/null && printf "  ✔️ modal library check passed" || {
+python3 -c "import modal" 2>/dev/null && printf "  ✔️ Modal is installed" || {
 	printf "
-	❌ $DARK_GREY modal $RESET not found.
-	Install modal ('uv add modal' or 'pip3 install modal') and re-run this script
+	❌ $DARK_GREY Modal $RESET is not installed.
+	Run 'uv add modal' or 'pip install modal' and re-run this script.
 	"
 	exit 1
 }
 
 printf "
 
-$BOLD Log into your modal acount & select $DARK_GREY duet $RESET as your workspace $RESET
+$BOLD Log into your Modal account and select $DARK_GREY duet $RESET as your workspace $RESET
 
 $REQUIRED_ACTION
 "
@@ -165,7 +165,7 @@ if [ -n "$user_input" ]; then
 fi
 
 modal setup || {
-	echo "❌ Modal set-up failed exiting script setup...."
+	echo "❌ Modal setup failed. Exiting."
 	exit 1
 }
 
@@ -181,7 +181,7 @@ printf "
 
 $BOLD$GREEN STAGE FOUR: ${STEP_FOUR}.. $RESET
 
-$BOLD Running a simple image verification on a modal container. $RESET
+$BOLD This will spin up a Modal GPU container and verify the DUET image. $RESET
 
 $REQUIRED_ACTION
 "
@@ -196,13 +196,13 @@ fi
 
 
 modal run scripts/verify_image.py || {
-	echo "❌ Image test on modal workspace failed...."
+	echo "❌ Container verification failed. Exiting."
 	exit 1
 }
 
 printf "
 
-$GREEN Image test on modal workspace complete $RESET 🎊
+$GREEN Container verification complete $RESET 🎊
 "
 echo ""
 
@@ -213,16 +213,15 @@ printf "
 
 $BOLD$GREEN STAGE FIVE: ${STEP_FIVE}.. $RESET
 
-If you're seeing this, it means your set-up was completely successful. 
-To make changes to this repository: 
-	1. Create a new branch -> $DARK_GREY git checkout <branch-name> / git switch -c <branch-name> $RESET
-	2. Make the changes to the repository.
-	3. Add your changes -> $DARK_GREY git add . or git add /path/to/file-or-folder  $RESET
-	4. Commit your changes -> $DARK_GREY git commit -m 'Your commit message'$RESET
-	5. Push to a new branch -> $DARK_GREY git push -u origin <branch-name> $RESET
-	6. Create a pull request on github for the changes to be reviewed and merged into the $DARK_GREY main $RESET branch
+Setup complete! Here is how to contribute to the repository:
+	1. Create a new branch -> $DARK_GREY git switch -c <branch-name> $RESET
+	2. Make your changes.
+	3. Stage your changes -> $DARK_GREY git add . or git add /path/to/file-or-folder $RESET
+	4. Commit your changes -> $DARK_GREY git commit -m 'Your commit message' $RESET
+	5. Push to your branch -> $DARK_GREY git push -u origin <branch-name> $RESET
+	6. Open a pull request on GitHub for your changes to be reviewed and merged into $DARK_GREY main $RESET
 
-$YELLOW NB: Do not push directly to the $DARK_GREY main $RESET branch as it is protected. $RESET
+$YELLOW Warning: Do not push directly to the $DARK_GREY main $RESET branch as it is protected. $RESET
 
 "
 
