@@ -11,4 +11,6 @@ wheels/
 config/.yaml_configs/api_keys.yaml
 config/infra.yaml
 config/image.yaml
+traces/
 .env
+*.DS_Store

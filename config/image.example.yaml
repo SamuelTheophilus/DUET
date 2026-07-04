@@ -7,3 +7,5 @@ packages:
   - "datasets==5.0.0"
   - "mlflow==3.12.0"
   - "fastapi[standard]"
+  - "TransferQueue==0.1.7"
+
