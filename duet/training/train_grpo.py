@@ -27,7 +27,8 @@ def setup():
             return match.group(1).replace(",", "")
 
         instruction = (
-            'Let\'s think step by step and output the final answer after "####".'
+            "Please reason step by step, and put your final answer within \\boxed{}. "
+            "for example: \\boxed{8} "
         )
 
         def process(split):
@@ -36,7 +37,11 @@ def setup():
                 return {
                     "data_source": "openai/gsm8k",
                     "prompt": [
-                        {"role": "user", "content": question + " " + instruction}
+                        {"role": "system", "content": instruction},
+                        {
+                            "role": "user",
+                            "content": question,
+                        },
                     ],
                     "ability": "math",
                     "reward_model": {
@@ -53,9 +58,7 @@ def setup():
 
             return fn
 
-        dataset["train"].map(process("train"), with_indices=True).to_parquet(
-            train_parquet
-        )
+        dataset["train"].map(process("train"), with_indices=True).to_parquet(train_parquet)
         dataset["test"].map(process("test"), with_indices=True).to_parquet(test_parquet)
         print(f"GSM8K saved to {GSM8K_DIR}")
     else:
@@ -72,7 +75,7 @@ def setup():
 
 def profile_cmd() -> list[str]:
     cmd = train_cmd()
-    
+
     cmd = [c for c in cmd if not c.startswith("trainer.total_training_steps")]
     cmd += [
         "trainer.total_training_steps=3",
@@ -108,6 +111,8 @@ def train_cmd() -> list[str]:
         "data.filter_overlong_prompts=True",
         "data.truncation=error",
         "algorithm.use_kl_in_reward=False",
+        "custom_reward_function.path=/root/duet/training/reward.py",
+        "custom_reward_function.name=custom_reward_function",
         # MODEL
         f"actor_rollout_ref.model.path={MODEL_DIR}",
         "actor_rollout_ref.model.use_remove_padding=True",
@@ -124,7 +129,6 @@ def train_cmd() -> list[str]:
         "actor_rollout_ref.actor.fsdp_config.optimizer_offload=False",
         "actor_rollout_ref.actor.ppo_max_token_len_per_gpu=3000",
         "actor_rollout_ref.actor.use_dynamic_bsz=True",
-
         # ROLLOUT
         "actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2",
         "actor_rollout_ref.rollout.tensor_model_parallel_size=1",
