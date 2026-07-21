@@ -14,3 +14,5 @@ config/image.yaml
 traces/
 .env
 *.DS_Store
+*.ipynb_checkpoints/
+*logs/
