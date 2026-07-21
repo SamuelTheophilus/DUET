@@ -16,3 +16,4 @@ traces/
 *.DS_Store
 *.ipynb_checkpoints/
 *logs/
+sanity_check.py
