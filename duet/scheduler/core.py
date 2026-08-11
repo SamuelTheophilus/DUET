@@ -146,12 +146,17 @@ class DifficultyOnlyScheduler(Scheduler):
         easy_base_prob = kwargs.get("easy_base_prob", 0.75)
         hard_base_prob = kwargs.get("hard_base_prob", 0.5)
 
-        for prompt in pool:
+
+        prompt_pt = 0
+        while len(selected_prompts) < batch_size and prompt_pt - 1 < len(pool):
+        ## Collect prompts into the selected prompts from the larger pool until the batch size is reached.
+            prompt = pool[prompt_pt]
+
             # Assumption here is the prompt is dictionary containing prompt_id, epoch, and predicted_reward.
-            prompt_id = prompt["prompt_id"]
-            epoch = prompt["epoch"]
+            prompt_id = prompt["extra_info"]["prompt_id"]
+            epoch = prompt["step"]
             # predicted_reward = prompt["predicted_reward"]
-            previous_reward = prompt["reward"]
+            previous_reward = prompt["score"]
 
             history = self.data[prompt_id]
             is_first_observation = len(history) == 0
@@ -171,10 +176,11 @@ class DifficultyOnlyScheduler(Scheduler):
                 continue
 
             selected_prompts.append(prompt)
+            prompt_pt +=1 
 
         print(f"INFO:[Selected Prompts] -> Easy prompts skipped {skip_easy_count}")
         print(f"INFO:[Selected Prompts]-> Easy prompts skipped {skip_hard_count}")
-        return selected_prompts[:batch_size]
+        return selected_prompts
 
     def reorder(self, prompts):
         return super().reorder(prompts)
