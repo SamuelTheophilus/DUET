@@ -34,8 +34,9 @@ class Scheduler(ABC):
         """
         return pool[:batch_size]
 
+
     @abstractmethod
-    def reorder(self, prompts, group_size_n):
+    def reorder(self, prompts):
         """
         Reorder selected prompts before batching.
         This may include arranging by difficulty, length, or both.
@@ -49,8 +50,9 @@ class Scheduler(ABC):
         """
         return prompts
 
+
     @abstractmethod
-    def pack(self, prompts) -> list:
+    def pack(self, prompts, pack_size: int) -> list:
         """
         Organises the re-ordered prompts into training batches
 
@@ -61,7 +63,10 @@ class Scheduler(ABC):
         Returns:
             A list of training batches.
         """
-        pass
+        return [
+            prompts[i : i + pack_size]
+            for i in range(0, len(prompts), pack_size)
+        ]
 
 
 class NoOpScheduler(Scheduler):
@@ -71,14 +76,14 @@ class NoOpScheduler(Scheduler):
     def select_prompts(self, pool, batch_size, **kwargs):
         return super().select_prompts(pool, batch_size, **kwargs)
 
-    def reorder(self, prompts, group_size_n):
-        return super().reorder(prompts, group_size_n)
+    def reorder(self, prompts):
+        return super().reorder(prompts)
 
-    def pack(self, prompts):
-        return [
-            prompts[i : i + self.mini_batch_size]
-            for i in range(len(prompts), self.mini_batch_size)
-        ]
+    def pack(self, prompts, pack_size: int):
+        return super().pack(prompts, pack_size)
+
+
+
 
 
 class LengthOnlyScheduler(Scheduler):
@@ -87,9 +92,10 @@ class LengthOnlyScheduler(Scheduler):
 
     def reorder(
         self,
-        prompts: list[dict],  # -> This is an assumption and maybe subject to modification
-        group_size_n: int = 2,
-    ) -> list[list[dict]]:
+        prompts: list[
+            dict
+        ],  # -> This is an assumption and maybe subject to modification
+    ) -> list[dict]:
         """
         Reorder the prompts based on the predicted lengths.
         Reordering returns a list of 'mini-batches', where each batch in this list will complete
@@ -99,31 +105,32 @@ class LengthOnlyScheduler(Scheduler):
         # Over here I'm assuming the prompts is a list[dict].
         # The data structure may be subject to change and this function will need to be updated
         # if/when the data structure changes.
-        sorted_prompts_by_predicted_length: list[dict] = sorted(
+        return sorted(
             prompts, key=lambda x: x["predicted_response_length"]
         )
         # Group the sorted prompts in to mini batches by `group_size_n`
-        return [
-            sorted_prompts_by_predicted_length[i : i + group_size_n]
-            for i in range(len(sorted_prompts_by_predicted_length), group_size_n)
-        ]
 
-    def pack(self, prompts):
-        return super().pack(prompts)
+    def pack(self, prompts, pack_size):
+        return super().pack(prompts, pack_size)
+
+
+
+
 
 
 class DifficultyOnlyScheduler(Scheduler):
-
     def __init__(self):
         super().__init__()
         self.data: dict = defaultdict(list)
-        self.EASY_SKIP_PROBABILITY_THRESHOLD = 0.98 # These should prolly be loaded from config.
-        self.HARD_SKIP_PROBABILITY_THRESHOLD = 0.11 # These should prolly be loaded from config.
+        # These should prolly be loaded from config.
+        self.EASY_SKIP_PROBABILITY_THRESHOLD = 0.98  
+        self.HARD_SKIP_PROBABILITY_THRESHOLD = 0.11
         self.BASELINE_PROBABILITY = 0.01
 
     def select_prompts(
         self,
-        pool: list[dict], # -> Assuming this is the entire pool and will be reduced by batch_size
+        # -> Assuming this is the entire pool and will be reduced by batch_size
+        pool: list[dict],
         batch_size: int,
         **kwargs,
     ) -> list[dict]:
@@ -139,19 +146,17 @@ class DifficultyOnlyScheduler(Scheduler):
         easy_base_prob = kwargs.get("easy_base_prob", 0.75)
         hard_base_prob = kwargs.get("hard_base_prob", 0.5)
 
-
         for prompt in pool:
             # Assumption here is the prompt is dictionary containing prompt_id, epoch, and predicted_reward.
             prompt_id = prompt["prompt_id"]
             epoch = prompt["epoch"]
-            predicted_reward = prompt["predicted_reward"]
-
-
+            # predicted_reward = prompt["predicted_reward"]
+            previous_reward = prompt["reward"]
 
             history = self.data[prompt_id]
             is_first_observation = len(history) == 0
 
-            history.append((epoch, predicted_reward))
+            history.append((epoch, previous_reward))
 
             if is_first_observation:
                 selected_prompts.append(prompt)
@@ -171,13 +176,11 @@ class DifficultyOnlyScheduler(Scheduler):
         print(f"INFO:[Selected Prompts]-> Easy prompts skipped {skip_hard_count}")
         return selected_prompts[:batch_size]
 
+    def reorder(self, prompts):
+        return super().reorder(prompts)
 
-    def reorder(self, prompts, group_size_n):
-        return super().reorder(prompts, group_size_n)
-
-
-    def pack(self, prompts):
-        return super().pack(prompts)
+    def pack(self, prompts, pack_size):
+        return super().pack(prompts, pack_size)
 
 
     def _skip_easy_prompts(
@@ -190,7 +193,7 @@ class DifficultyOnlyScheduler(Scheduler):
         Compares the most recent reward in against the threshold for demarcating a prompt as easy.
         And returns the appropriate value for when the reward is greater, equal to or lesser than the threshold.
 
-        Args: 
+        Args:
             prompt: dict
 
         Returns:
@@ -224,7 +227,7 @@ class DifficultyOnlyScheduler(Scheduler):
         Compares the most recent reward in against the threshold for demarcating a prompt as difficult.
         And returns the appropriate value for when the reward is greater, equal to or lesser than the threshold.
 
-        Args: 
+        Args:
             prompt: dict
 
         Returns:
@@ -254,7 +257,7 @@ class DifficultyOnlyScheduler(Scheduler):
         )
 
         return torch.rand(()).item() < skip_probability
-    
+
 
 class JointScheduler(Scheduler):
     def __init__(self) -> None:
@@ -265,8 +268,8 @@ class JointScheduler(Scheduler):
     def select_prompts(self, pool, batch_size, **kwargs):
         return self.difficulty_scheduler.select_prompts(pool, batch_size, **kwargs)
 
-    def reorder(self, prompts, group_size_n):
-        return self.length_scheduler.reorder(prompts, group_size_n)
+    def reorder(self, prompts):
+        return self.length_scheduler.reorder(prompts)
 
-    def pack(self, prompts):
-        return super().pack(prompts)
+    def pack(self, prompts, pack_size):
+        return super().pack(prompts, pack_size)
