@@ -1,4 +1,6 @@
+from typing import final
 import torch
+from tensordict import TensorDict
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
@@ -34,7 +36,6 @@ class Scheduler(ABC):
         """
         return pool[:batch_size]
 
-
     @abstractmethod
     def reorder(self, prompts):
         """
@@ -50,7 +51,6 @@ class Scheduler(ABC):
         """
         return prompts
 
-
     @abstractmethod
     def pack(self, prompts, pack_size: int) -> list:
         """
@@ -63,10 +63,14 @@ class Scheduler(ABC):
         Returns:
             A list of training batches.
         """
-        return [
-            prompts[i : i + pack_size]
-            for i in range(0, len(prompts), pack_size)
-        ]
+        return [prompts[i : i + pack_size] for i in range(0, len(prompts), pack_size)]
+
+    def update(self, prompt_id, step, observed_reward):
+        """
+        Updates the streak history of every prompt at each step.
+        Used primarily by the difficulty only scheduler
+        """
+        pass
 
 
 class NoOpScheduler(Scheduler):
@@ -74,71 +78,79 @@ class NoOpScheduler(Scheduler):
         self.mini_batch_size = 8  # This is passed in the config of the user.
 
     def select_prompts(self, pool, batch_size, **kwargs):
+        print("[NoOpScheduler]: selecting prompts")
         return super().select_prompts(pool, batch_size, **kwargs)
 
     def reorder(self, prompts):
+        print("[NoOpScheduler]: reordering prompts")
         return super().reorder(prompts)
 
     def pack(self, prompts, pack_size: int):
+        print("[NoOpScheduler]: packing prompts")
         return super().pack(prompts, pack_size)
 
-
+    def update(self, prompt_id, step, observed_reward):
+        super().update(prompt_id, step, observed_reward)
 
 
 
 class LengthOnlyScheduler(Scheduler):
+    name: str = "LengthOnlyScheduler"
+
     def select_prompts(self, pool, batch_size, **kwargs):
+        print(f"[{self.name}] filtering prompts. (Fall through).")
         return super().select_prompts(pool, batch_size, **kwargs)
 
-    def reorder(
-        self,
-        prompts: list[
-            dict
-        ],  # -> This is an assumption and maybe subject to modification
-    ) -> list[dict]:
+    def reorder(self, prompts: TensorDict) -> TensorDict:
         """
         Reorder the prompts based on the predicted lengths.
         Reordering returns a list of 'mini-batches', where each batch in this list will complete
         an entire step (rollout, reward-calc, advantage-calc, training) in the GRPO step.
         This introduces some off-policy-ness and uses KL-penalty adjustment.
         """
-        # Over here I'm assuming the prompts is a list[dict].
-        # The data structure may be subject to change and this function will need to be updated
-        # if/when the data structure changes.
-        return sorted(
-            prompts, key=lambda x: x["predicted_response_length"]
+        print(f"[{self.name}] reordering prompts")
+        indices = sorted(
+            # Sorting this way returns the position of the indicies which can be used to "reshuffle"
+            # the prompts in this manner: prompts[indices]. Doing it this way to preserve the output as a
+            # TensorDict and not a list.
+            range(len(prompts)),
+            key=lambda i: prompts[i]["extra_info"].get("predicted_response_length", 0),
         )
-        # Group the sorted prompts in to mini batches by `group_size_n`
+
+        return prompts[indices]
 
     def pack(self, prompts, pack_size):
+        print(f"[{self.name}] packing prompts into mini-batches of size {pack_size}")
         return super().pack(prompts, pack_size)
 
-
-
-
+    def update(self, prompt_id, step, observed_reward):
+        pass
 
 
 class DifficultyOnlyScheduler(Scheduler):
+    name: str = "DifficultyOnlyScheduler"
+
     def __init__(self):
         super().__init__()
         self.data: dict = defaultdict(list)
         # These should prolly be loaded from config.
-        self.EASY_SKIP_PROBABILITY_THRESHOLD = 0.98  
+        self.EASY_SKIP_PROBABILITY_THRESHOLD = 0.98
         self.HARD_SKIP_PROBABILITY_THRESHOLD = 0.11
         self.BASELINE_PROBABILITY = 0.01
 
     def select_prompts(
         self,
         # -> Assuming this is the entire pool and will be reduced by batch_size
-        pool: list[dict],
+        pool: TensorDict,
         batch_size: int,
         **kwargs,
-    ) -> list[dict]:
+    ) -> TensorDict:
         """
         Removes all prompts that have been predicted to be zero variance (i.e All their rollout responses will return 0/1)
         """
+        print(f"[{self.name}] filtering prompts")
 
-        selected_prompts = []
+        selected_indices = []
 
         skip_easy_count = 0
         skip_hard_count = 0
@@ -146,25 +158,19 @@ class DifficultyOnlyScheduler(Scheduler):
         easy_base_prob = kwargs.get("easy_base_prob", 0.75)
         hard_base_prob = kwargs.get("hard_base_prob", 0.5)
 
-
         prompt_pt = 0
-        while len(selected_prompts) < batch_size and prompt_pt - 1 < len(pool):
-        ## Collect prompts into the selected prompts from the larger pool until the batch size is reached.
+        while len(selected_indices) < batch_size and prompt_pt < len(pool):
+            ## Collect prompts into the selected prompts from the larger pool until the batch size is reached.
             prompt = pool[prompt_pt]
+            prompt_id = prompt["prompt_id"]
 
-            # Assumption here is the prompt is dictionary containing prompt_id, epoch, and predicted_reward.
-            prompt_id = prompt["extra_info"]["prompt_id"]
-            epoch = prompt["step"]
-            # predicted_reward = prompt["predicted_reward"]
-            previous_reward = prompt["score"]
+            idx = prompt_pt
+            prompt_pt += 1
 
             history = self.data[prompt_id]
-            is_first_observation = len(history) == 0
 
-            history.append((epoch, previous_reward))
-
-            if is_first_observation:
-                selected_prompts.append(prompt)
+            if len(history) == 0: # First observation of the prompt
+                selected_indices.append(idx)
                 continue
 
             if self._skip_easy_prompts(prompt, base_prob=easy_base_prob):
@@ -175,19 +181,25 @@ class DifficultyOnlyScheduler(Scheduler):
                 skip_hard_count += 1
                 continue
 
-            selected_prompts.append(prompt)
-            prompt_pt +=1 
+            selected_indices.append(idx)
 
-        print(f"INFO:[Selected Prompts] -> Easy prompts skipped {skip_easy_count}")
-        print(f"INFO:[Selected Prompts]-> Easy prompts skipped {skip_hard_count}")
-        return selected_prompts
+        print(f"INFO:[Selected Prompts]-> Easy prompts skipped {skip_easy_count}")
+        print(f"INFO:[Selected Prompts]-> Hard prompts skipped {skip_hard_count}")
+        if not selected_indices:
+            # TODO: what happens when there are no prompts selected? (i.e all the prompts are skipped)
+            # I'm thinking there should be some sort of minimum amount of prompts returned regardless.
+            return pool[:0]
+
+        return pool[selected_indices]
 
     def reorder(self, prompts):
+        print(f"[{self.name}] reordering prompts (Fall through).")
         return super().reorder(prompts)
 
     def pack(self, prompts, pack_size):
-        return super().pack(prompts, pack_size)
+        print(f"[{self.name}] packing prompts")
 
+        return super().pack(prompts, pack_size)
 
     def _skip_easy_prompts(
         self,
@@ -265,6 +277,15 @@ class DifficultyOnlyScheduler(Scheduler):
         return torch.rand(()).item() < skip_probability
 
 
+    def update(self, prompt_id, step, observed_reward):
+        """
+        Records the step and reward for each prompt after rewards have been generated
+        (i.e in the reward generation step).
+        """
+        self.data[prompt_id].append((step, observed_reward))
+
+
+
 class JointScheduler(Scheduler):
     def __init__(self) -> None:
         super().__init__()
@@ -279,3 +300,19 @@ class JointScheduler(Scheduler):
 
     def pack(self, prompts, pack_size):
         return super().pack(prompts, pack_size)
+
+    def update(self, prompt_id, step, observed_reward):
+        self.difficulty_scheduler.update(prompt_id, step, observed_reward)
+
+
+
+SCHEDULERS = {
+    "noops": NoOpScheduler,
+    "length_only": LengthOnlyScheduler,
+    "difficulty_only": DifficultyOnlyScheduler,
+    "joint": JointScheduler,
+}
+
+
+def get_scheduler(key: str):
+    return SCHEDULERS.get(key, None)

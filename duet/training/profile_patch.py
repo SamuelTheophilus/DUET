@@ -1,7 +1,11 @@
 import os
 import sys
 
-TRACE_DIR = "/data/traces"
+
+from ..scheduler.trainer import install_duet_trainer
+
+
+TRACE_DIR = "/data/test_traces"
 
 
 def patch_verl_for_profiling():
@@ -31,6 +35,8 @@ def patch_verl_for_profiling():
 
         AgentLoopManager._performance_metrics = new_performance_metrics
         print("[duet] AgentLoopManager._performance_metrics patched")
+
+        install_duet_trainer()
 
     # already imported? patch immediately
     if TARGET in sys.modules:

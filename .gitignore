@@ -11,9 +11,11 @@ wheels/
 config/.yaml_configs/api_keys.yaml
 config/infra.yaml
 config/image.yaml
+config/duet_rlhf.yaml
 traces/
 .env
 *.DS_Store
 *.ipynb_checkpoints/
 *logs/
 sanity_check.py
+scratch_pad/
