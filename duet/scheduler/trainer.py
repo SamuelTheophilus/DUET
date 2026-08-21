@@ -32,7 +32,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
             self.scheduler.reset_stats()
             
             print("[DUET] calling schedulers")
-            batch = self.scheduler.select_prompts(batch, batch_size=candidate_batch, update_stats=False)
+            batch = self.scheduler.select_prompts(batch, batch_size=candidate_batch)
             batch = self.scheduler.reorder(batch)
             self.selected_count = len(batch)
         else:
