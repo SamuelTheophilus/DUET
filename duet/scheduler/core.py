@@ -1,8 +1,8 @@
-from typing import final
 import torch
 from tensordict import TensorDict
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from .utils import SelectPromptStats
 
 import logging
 
@@ -19,6 +19,7 @@ class Scheduler(ABC):
     Implementations of each scheduler's core functions (select_prompts, reorder, and pack) may differ.
     Implementations of each scheduler never mutates the original pool.
     """
+    last_stats: SelectPromptStats
 
     @abstractmethod
     def select_prompts(self, pool, batch_size, **kwargs):
@@ -72,6 +73,9 @@ class Scheduler(ABC):
         """
         pass
 
+    def reset_stats(self):
+        pass
+
 
 class NoOpScheduler(Scheduler):
     def __init__(self) -> None:
@@ -91,6 +95,9 @@ class NoOpScheduler(Scheduler):
 
     def update(self, prompt_id, step, observed_reward):
         super().update(prompt_id, step, observed_reward)
+
+    def reset_stats(self):
+        return super().reset_stats()
 
 
 
@@ -138,6 +145,11 @@ class DifficultyOnlyScheduler(Scheduler):
         self.HARD_SKIP_PROBABILITY_THRESHOLD = 0.11
         self.BASELINE_PROBABILITY = 0.01
 
+        self.last_stats: SelectPromptStats = SelectPromptStats()
+
+    def reset_stats(self):
+        self.last_stats = SelectPromptStats()
+
     def select_prompts(
         self,
         # -> Assuming this is the entire pool and will be reduced by batch_size
@@ -157,6 +169,7 @@ class DifficultyOnlyScheduler(Scheduler):
 
         easy_base_prob = kwargs.get("easy_base_prob", 0.75)
         hard_base_prob = kwargs.get("hard_base_prob", 0.5)
+
 
         prompt_pt = 0
         while len(selected_indices) < batch_size and prompt_pt < len(pool):
@@ -188,7 +201,16 @@ class DifficultyOnlyScheduler(Scheduler):
         if not selected_indices:
             # TODO: what happens when there are no prompts selected? (i.e all the prompts are skipped)
             # I'm thinking there should be some sort of minimum amount of prompts returned regardless.
-            return pool[:0]
+            raise NotImplementedError(
+                "DUET, not implemented logic for when all prompts are skipped"
+            )
+            # return pool[:0]
+
+        # Record the last stats
+        self.last_stats.selected += len(selected_indices)
+        self.last_stats.skipped_easy += skip_easy_count
+        self.last_stats.skipped_hard += skip_hard_count
+        self.last_stats.pool_size += len(pool)
 
         return pool[selected_indices]
 

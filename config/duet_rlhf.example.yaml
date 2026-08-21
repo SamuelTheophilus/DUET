@@ -22,7 +22,6 @@ algorithm:
 data:
   train_files: ${paths.train_files}
   val_files: ${paths.val_files}
-  train_batch_size: 128
   max_prompt_length: 1024
   max_response_length: 1024
   filter_overlong_prompts: true
@@ -31,6 +30,7 @@ data:
   # Profiling overrides
   shuffle: false
   train_max_samples: 128
+  train_batch_size: 128
 
 reward:
   custom_reward_function:
@@ -125,7 +125,7 @@ trainer:
   test_freq: 5
 
   # Profiling run
-  total_epochs: 1
+  total_epochs: 3
   total_training_steps: null
 
   rollout_data_dir: ${paths.rollout_dir}
@@ -133,7 +133,8 @@ trainer:
   val_before_train: false
 
   duet:
-    scheduler: length_only
+    scheduler: length_only # length_only | difficulty_only | noops | joint
+    underfill_policy: short # short | refill
 
 global_profiler:
   tool: torch
