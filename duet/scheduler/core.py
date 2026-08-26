@@ -19,7 +19,7 @@ class Scheduler(ABC):
     Implementations of each scheduler's core functions (select_prompts, reorder, and pack) may differ.
     Implementations of each scheduler never mutates the original pool.
     """
-    last_stats: SelectPromptStats
+    last_stats: SelectPromptStats | None = None
 
     @abstractmethod
     def select_prompts(self, pool, batch_size, **kwargs):
@@ -80,6 +80,7 @@ class Scheduler(ABC):
 class NoOpScheduler(Scheduler):
     def __init__(self) -> None:
         self.mini_batch_size = 8  # This is passed in the config of the user.
+        self.last_stats: SelectPromptStats | None = SelectPromptStats()
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print("[NoOpScheduler]: selecting prompts")
@@ -211,6 +212,7 @@ class DifficultyOnlyScheduler(Scheduler):
         self.last_stats.skipped_easy += skip_easy_count
         self.last_stats.skipped_hard += skip_hard_count
         self.last_stats.pool_size += len(pool)
+        self.last_stats.considered += prompt_pt
 
         return pool[selected_indices]
 

@@ -5,7 +5,41 @@ import sys
 from ..scheduler.trainer import install_duet_trainer
 
 
-TRACE_DIR = "/data/test_traces"
+trace_dir = "/data/test_traces"
+def get_trace_dir():
+    run_dir = os.environ["DUET_RUN_DIR"]
+    return os.path.join(run_dir, "gen_times")
+
+
+
+def apply(module):
+    try:
+        import numpy as np
+
+        AgentLoopManager = module.AgentLoopManager
+    except Exception as e:
+        print(f"[duet] gen-time patch skipped: {e}")
+        return
+    # trace_dir = get_trace_dir()
+
+    os.makedirs(trace_dir, exist_ok=True)
+    orig = AgentLoopManager._performance_metrics
+    state = {"call": 0}
+
+    def new_performance_metrics(self, metrics, output):
+        print("*" * 80)
+        print("Saving generation_times")
+        print("*" * 80)
+
+        arr = np.array([m["generate_sequences"] for chunk in metrics for m in chunk])
+        np.save(f"{trace_dir}/_gen_time_call{state['call']:03d}.npy", arr)
+        state["call"] += 1
+        return orig(self, metrics, output)
+
+    AgentLoopManager._performance_metrics = new_performance_metrics
+    print("[duet] AgentLoopManager._performance_metrics patched")
+
+    install_duet_trainer()
 
 
 def patch_verl_for_profiling():
@@ -13,30 +47,6 @@ def patch_verl_for_profiling():
     the moment verl's agent_loop module is imported -- NOT now, to avoid
     triggering transformer_engine's GPU probe before Ray assigns devices."""
     TARGET = "verl.experimental.agent_loop.agent_loop"
-
-    def apply(module):
-        try:
-            import numpy as np
-
-            AgentLoopManager = module.AgentLoopManager
-        except Exception as e:
-            print(f"[duet] gen-time patch skipped: {e}")
-            return
-
-        os.makedirs(TRACE_DIR, exist_ok=True)
-        orig = AgentLoopManager._performance_metrics
-        state = {"call": 0}
-
-        def new_performance_metrics(self, metrics, output):
-            arr = np.array([m["generate_sequences"] for chunk in metrics for m in chunk])
-            np.save(f"{TRACE_DIR}/gen_time_call{state['call']:03d}.npy", arr)
-            state["call"] += 1
-            return orig(self, metrics, output)
-
-        AgentLoopManager._performance_metrics = new_performance_metrics
-        print("[duet] AgentLoopManager._performance_metrics patched")
-
-        install_duet_trainer()
 
     # already imported? patch immediately
     if TARGET in sys.modules:
