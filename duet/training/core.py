@@ -98,11 +98,12 @@ def setup(force: bool = False):
     download_model()
 
 
-def train_cmd() -> list[str]:
-    return [
+def train_cmd(overrides: list[str] = []) -> list[str]:
+    cmd = [
         "python3",
         "-m",
         "verl.trainer.main_ppo",
         "--config-dir=/root/",
         "+config=duet_rlhf",
     ]
+    return cmd + overrides

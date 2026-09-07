@@ -361,16 +361,16 @@ class DuetPPOTrainerSync(PPOTrainerSync):
 
             self._save_generation_times(
                 batch,
+                metrics,
                 global_steps,
             )
         except Exception as error:
             print("Saving generation times failed. See error below")
             print(f"Error: {str(error)}")
 
+    
 
-
-
-    def _save_generation_times(self, batch, global_steps):
+    def _save_generation_times(self, batch, metrics, global_steps):
         """
         Saving all the rollout durations into a .npy file for each step
         """
@@ -387,8 +387,16 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         data = tq.kv_batch_get(
             keys=real_keys,
             partition_id=batch.partition_id,
-            select_fields=["metrics"],
+            select_fields=["metrics", "responses"],
         )
+
+
+
+
+        # ===========================================================
+        # Save generation durations (raw second counts) for all rollouts. 
+        # ===========================================================
+
 
         agent_metrics = tu.get(data, "metrics")
 
@@ -400,22 +408,39 @@ class DuetPPOTrainerSync(PPOTrainerSync):
             dtype=np.float64,
         )
 
-        trace_dir = os.path.join(
-            os.environ["DUET_RUN_DIR"],
-            "gen_times",
-        )
+        trace_dir = os.path.join(os.environ["DUET_RUN_DIR"], "gen_times",)
         os.makedirs(trace_dir, exist_ok=True)
 
-        path = os.path.join(
-            trace_dir,
-            f"gen_time_call{global_steps - 1:03d}.npy",
-        )
-
+        path = os.path.join(trace_dir, f"gen_time_call{global_steps - 1:03d}.npy")
         np.save(path, generation_times)
 
         print(
             f"[DUET] saved {len(generation_times)} generation times "
             f"to {path}"
+        )
+
+        # ==============================================================
+        # Save p95 for response lengths and the total generated response
+        # tokens.
+        # ==============================================================
+
+        _responses = data.get("responses")
+        if _responses is None:
+            print("[DUET] no parameter `responses` found the data retrieved from TQ")
+            return
+
+        response_lengths = _responses.offsets().diff()
+        metrics["response_length/p95"] = torch.quantile(
+            response_lengths.float(), 0.95
+            ).item()
+        metrics["response_length/max_from_tq"] = int(
+            response_lengths.max().item()
+        )
+        metrics["duet/generated_response_tokens"] = int(
+            response_lengths.sum().item()
+        )
+        metrics["response_length/at_cap"] = int(
+            (response_lengths == self.config.data.max_response_length).sum().item()
         )
 
 
