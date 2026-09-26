@@ -32,7 +32,8 @@ paths:
 
 
 custom_config:
-  seed: 42
+  seed: 90
+
 
 algorithm:
   adv_estimator: grpo
@@ -41,15 +42,15 @@ algorithm:
 data:
   train_files: ${paths.train_files}
   val_files: ${paths.val_files}
-  train_batch_size: 128
+  train_batch_size: 512
   max_prompt_length: 1024
   max_response_length: 3072
   filter_overlong_prompts: true
   truncation: error
 
   # Profiling overrides
-  shuffle: false
-  train_max_samples: 256
+  shuffle: true #true # false
+  train_max_samples: 2048 #1024
 
 reward:
   custom_reward_function:
@@ -65,10 +66,10 @@ actor_rollout_ref:
   actor:
     ppo_mini_batch_size: 128
     ppo_micro_batch_size_per_gpu: 2
-    ppo_max_token_len_per_gpu: 4096
+    ppo_max_token_len_per_gpu: 8192
     use_dynamic_bsz: true
 
-    use_kl_loss: true
+    use_kl_loss: false
     kl_loss_coef: 0.001
     kl_loss_type: low_var_kl
     entropy_coeff: 0
@@ -102,18 +103,19 @@ actor_rollout_ref:
     name: vllm
     tensor_model_parallel_size: 1
     response_length: ${data.max_response_length} 
+    disable_log_stats: false
 
-    gpu_memory_utilization: 0.3
+    gpu_memory_utilization: 0.4
     enable_chunked_prefill: false
     enforce_eager: false
     free_cache_engine: true
 
-    n: 5
-    max_num_seqs: 512
+    n: 8
+    max_num_seqs: 640
 
     log_prob_micro_batch_size_per_gpu: 2
     log_prob_use_dynamic_bsz: true
-    log_prob_max_token_len_per_gpu: 4096
+    log_prob_max_token_len_per_gpu: 8192
 
     #================================================
     # For determinism, setting seed to a specific 
@@ -137,6 +139,7 @@ actor_rollout_ref:
           discrete: true
 
     agent:
+      num_workers: 2
       agent_loop_manager_class: duet.scheduler.manager.MyAgentLoopManager
 
   ref:
@@ -171,7 +174,7 @@ trainer:
   nnodes: 1
 
   save_freq: 20
-  test_freq: 4
+  test_freq: 8
 
   # Profiling run
   total_epochs: 2
@@ -181,13 +184,18 @@ trainer:
   rollout_data_dir: ${paths.rollout_dir}
   default_local_dir: ${paths.run_dir}/checkpoints
 
-  val_before_train: true
+  val_before_train: false
 
   duet:
     # Options:: difficulty_only | length_only | noops | joint
-    scheduler: noops
     # Options:: short | refill
+
+    scheduler: noops
     underfill_policy: refill
+    scheduler_options:
+      - noops
+      # - difficulty_only
+      # - length_only
 
 global_profiler:
   tool: torch

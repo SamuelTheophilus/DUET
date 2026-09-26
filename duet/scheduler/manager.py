@@ -1,7 +1,8 @@
-import os
-import torch
+# import os
+import ray
 from tensordict import TensorDict
-from .core import  Scheduler, get_scheduler
+# import torch
+# from .core import  Scheduler, get_scheduler
 
 from verl.trainer.ppo.v1 import AgentLoopManagerTQ
 from verl.utils.ray_utils import auto_await
@@ -11,8 +12,8 @@ class MyAgentLoopManager:
     def __init__(self, inner_manager, config):
         self.inner_manager = inner_manager
         self.config = config
-        _schdeduler_cls = get_scheduler(self.config.trainer.duet.scheduler)
-        self.scheduler: Scheduler | None  = _schdeduler_cls() if _schdeduler_cls else None
+        # _schdeduler_cls = get_scheduler(self.config.trainer.duet.scheduler)
+        # self.scheduler: Scheduler | None  = _schdeduler_cls() if _schdeduler_cls else None
 
     @classmethod
     @auto_await
@@ -43,7 +44,7 @@ class MyAgentLoopManager:
             config=config,
         )
 
-    def generate_sequences(self, prompts: TensorDict) -> None:
+    def _generate_sequences(self, prompts: TensorDict) -> None:
         """
         Custom wrapper over the original generate_sequences.
         Modifies prompts by filtering, reordering or packing before
@@ -77,3 +78,40 @@ class MyAgentLoopManager:
         #
         return self.inner_manager.generate_sequences(prompts)
 
+    def generate_sequences(self, prompts: TensorDict) -> None:
+
+        print(f"[duet] Batch size: {len(prompts)}")
+
+        if "assign_to_worker" not in prompts:
+
+            print("*" * 80)
+            print("[duet] generating prompt without assigning to specific workers")
+            print("*" * 80)
+
+            return self.inner_manager.generate_sequences(prompts)
+
+        worker_ids = prompts["assign_to_worker"]
+
+        refs = []
+
+        for worker_idx, worker in enumerate(
+            self.inner_manager.agent_loop_workers
+        ):
+            mask = worker_ids == worker_idx
+
+            if not mask.any():
+                continue
+
+            worker_batch = prompts[mask]
+            worker_batch.pop("assign_to_worker")
+
+            refs.append(
+                worker.generate_sequences.remote(worker_batch)
+            )
+
+        print("*" * 80)
+        print("[duet] generating sequences with assigning to specific workers")
+        print("*" * 80)
+
+
+        ray.get(refs)

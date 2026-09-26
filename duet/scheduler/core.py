@@ -1,4 +1,7 @@
+import json
+import os
 import torch
+from pathlib import Path
 from tensordict import TensorDict
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -19,7 +22,9 @@ class Scheduler(ABC):
     Implementations of each scheduler's core functions (select_prompts, reorder, and pack) may differ.
     Implementations of each scheduler never mutates the original pool.
     """
+
     last_stats: SelectPromptStats | None = None
+    name: str = ""
 
     @abstractmethod
     def select_prompts(self, pool, batch_size, **kwargs):
@@ -76,11 +81,20 @@ class Scheduler(ABC):
     def reset_stats(self):
         pass
 
+    @abstractmethod
+    def assign(
+        self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
+    ) -> TensorDict:
+        return torch.cat(buckets, dim=0)
+
 
 class NoOpScheduler(Scheduler):
+    name: str = "noops"
+
     def __init__(self) -> None:
         self.mini_batch_size = 8  # This is passed in the config of the user.
         self.last_stats: SelectPromptStats | None = SelectPromptStats()
+        self.data: dict  = defaultdict(list)
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print("[NoOpScheduler]: selecting prompts")
@@ -94,16 +108,47 @@ class NoOpScheduler(Scheduler):
         print("[NoOpScheduler]: packing prompts")
         return super().pack(prompts, pack_size)
 
+    # def update(self, prompt_id, step, observed_reward):
+    #     super().update(prompt_id, step, observed_reward)
+    #
+
     def update(self, prompt_id, step, observed_reward):
-        super().update(prompt_id, step, observed_reward)
+            """
+            Records the step and reward for each prompt after rewards have been generated
+            (i.e in the reward generation step).
+            """
+            self.data[prompt_id].append((step, observed_reward))
+
+
+
 
     def reset_stats(self):
         return super().reset_stats()
 
+    def assign(self, buckets, num_workers, schedulling_type: str = "lpt"):
+        return super().assign(buckets, num_workers, schedulling_type)
+
+
+    def save_history(self, step: int) -> None:
+
+        streak_dir_str = os.environ.get("PROMPT_STREAK_DIR")
+        if not streak_dir_str:
+            return
+
+        streak_dir = Path(streak_dir_str) 
+        if not streak_dir.is_dir():
+            return 
+
+        with (streak_dir/ f"{step}.json").open("w") as f:
+            json.dump(self.data, f)
+
 
 
 class LengthOnlyScheduler(Scheduler):
-    name: str = "LengthOnlyScheduler"
+    name: str = "length_only"
+
+    def __init__(self):
+        self.last_stats: SelectPromptStats | None = SelectPromptStats()
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print(f"[{self.name}] filtering prompts. (Fall through).")
@@ -134,9 +179,52 @@ class LengthOnlyScheduler(Scheduler):
     def update(self, prompt_id, step, observed_reward):
         pass
 
+    def assign(
+        self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
+    ):
+        """
+        Assigning buckets to workers using LPT/Round-robin schedulling.
+        """
+
+        weight_per_worker = [0 for _ in range(num_workers)]
+
+        bucket_weights = [(bucket, self._bucket_weight(bucket)) for bucket in buckets]
+
+        bucket_weights.sort(key=lambda x: x[1], reverse=True)
+
+        assigned_buckets = []
+
+        if schedulling_type == "lpt":
+            for bucket, weight in bucket_weights:
+                min_idx = weight_per_worker.index(min(weight_per_worker))
+
+                bucket["assign_to_worker"] = torch.full(
+                    bucket.batch_size, min_idx, dtype=torch.long, device=bucket.device
+                )
+                assigned_buckets.append(bucket)
+
+                weight_per_worker[min_idx] = weight_per_worker[min_idx] + weight
+        else:
+            # Default round robin schedulling
+            for idx, (bucket, _) in enumerate(bucket_weights):
+                worker_id = idx % num_workers
+                bucket["assign_to_worker"] = torch.full(
+                    bucket.batch_size, worker_id, dtype=torch.long, device=bucket.device
+                )
+                assigned_buckets.append(bucket)
+
+        return torch.cat(assigned_buckets, dim=0)
+
+    def _bucket_weight(self, bucket: TensorDict) -> int:
+
+        return sum(
+            prompt["extra_info"].get("predicted_response_length", 0)
+            for prompt in bucket
+        )
+
 
 class DifficultyOnlyScheduler(Scheduler):
-    name: str = "DifficultyOnlyScheduler"
+    name: str = "difficulty_only"
 
     def __init__(self):
         super().__init__()
@@ -171,7 +259,6 @@ class DifficultyOnlyScheduler(Scheduler):
         easy_base_prob = kwargs.get("easy_base_prob", 0.75)
         hard_base_prob = kwargs.get("hard_base_prob", 0.5)
 
-
         prompt_pt = 0
         while len(selected_indices) < batch_size and prompt_pt < len(pool):
             ## Collect prompts into the selected prompts from the larger pool until the batch size is reached.
@@ -183,7 +270,7 @@ class DifficultyOnlyScheduler(Scheduler):
 
             history = self.data[prompt_id]
 
-            if len(history) == 0: # First observation of the prompt
+            if len(history) == 0:  # First observation of the prompt
                 selected_indices.append(idx)
                 continue
 
@@ -300,7 +387,6 @@ class DifficultyOnlyScheduler(Scheduler):
 
         return torch.rand(()).item() < skip_probability
 
-
     def update(self, prompt_id, step, observed_reward):
         """
         Records the step and reward for each prompt after rewards have been generated
@@ -309,8 +395,29 @@ class DifficultyOnlyScheduler(Scheduler):
         self.data[prompt_id].append((step, observed_reward))
 
 
+    def save_history(self, step: int) -> None:
+
+        streak_dir_str = os.environ.get("PROMPT_STREAK_DIR")
+        if not streak_dir_str:
+            return
+
+        streak_dir = Path(streak_dir_str) 
+        if not streak_dir.is_dir():
+            return 
+
+        with (streak_dir/ f"{step}.json").open("w") as f:
+            json.dump(self.data, f)
+
+    def assign(
+        self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
+    ) -> TensorDict:
+        return torch.cat(buckets, dim=0)
+        # return super().assign(buckets, num_workers)
+
 
 class JointScheduler(Scheduler):
+    name: str = "joint"
+
     def __init__(self) -> None:
         super().__init__()
         self.difficulty_scheduler = DifficultyOnlyScheduler()
@@ -328,6 +435,10 @@ class JointScheduler(Scheduler):
     def update(self, prompt_id, step, observed_reward):
         self.difficulty_scheduler.update(prompt_id, step, observed_reward)
 
+    def assign(
+        self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
+    ) -> TensorDict:
+        return self.length_scheduler.assign(buckets, num_workers)
 
 
 SCHEDULERS = {

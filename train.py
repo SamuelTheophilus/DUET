@@ -44,7 +44,10 @@ def initialize_run_directories(
 ):
     import os
     import shutil
+    import subprocess
+    import socket
     from pathlib import Path
+
 
     if test:
         run_dir = Path("/data/runs/test")
@@ -59,6 +62,19 @@ def initialize_run_directories(
         run_dir = Path("/data/runs") / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
+
+    nvidia_cmd = ["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"]
+    gpu_uuid = subprocess.check_output(nvidia_cmd).decode("utf-8").strip()
+
+    container_hostname = f"--- Container Hostname {socket.gethostname()}"
+    gpu_uuid_record = f"--- GPU UUID {gpu_uuid}"
+
+
+
+    # ======================================
+    # Writing description of the run.
+    # ======================================
+    run_description = f"{run_description}\n\n{container_hostname}\n\n{gpu_uuid_record}"
     (run_dir / "description.txt").write_text(run_description)
 
     env = os.environ.copy()
@@ -68,8 +84,18 @@ def initialize_run_directories(
     mlflow_dir = Path("/data/mlflow")
     mlflow_dir.mkdir(parents=True, exist_ok=True)
 
+
+    # Creating the streak directory
+    streak_dir = run_dir / "prompt_streak"
+    env["PROMPT_STREAK_DIR"] = str(streak_dir)
+    streak_dir.mkdir(parents=True, exist_ok=True)
+
     env["MLFLOW_TRACKING_URI"] = f"sqlite:////data/mlflow/{run_id}.db"
+    env["VLLM_LOGGING_LEVEL"] = "INFO"
     env["HYDRA_FULL_ERROR"] = "1"
+
+
+    
 
     return env
 
@@ -161,6 +187,7 @@ def _profile(
     test: bool = False,
 ):
     import subprocess
+    import socket
     from duet.training import train_cmd
 
     print(f"[{run_id}] starting — overrides: {overrides}", flush=True)
@@ -172,6 +199,8 @@ def _profile(
     )
 
     cmd = train_cmd(overrides=overrides)
+
+
     save_train_config(cmd, env)
 
     subprocess.run(cmd, check=True, env=env)

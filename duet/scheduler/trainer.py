@@ -1,5 +1,6 @@
 import torch
 import math
+from verl.utils import tensordict_utils as tu
 from verl.utils.debug import marked_timer
 from verl.trainer.ppo.v1  import  PPOTrainerSync
 from verl.trainer.ppo.v1.utils import MetricsAggregator
@@ -11,18 +12,40 @@ from collections import defaultdict, Counter
 from .core import Scheduler, get_scheduler
 
 
+default_schedulers = {
+    "noops": 0,
+    "difficulty_only": 1,
+    "length_only": 2,
+    "joint": 3
+}
+
+
 class DuetPPOTrainerSync(PPOTrainerSync):
 
     def __init__(self, config) -> None:
         super().__init__(config)
-        _scheduler_cls = get_scheduler(self.config.trainer.duet.scheduler) 
-        self.scheduler: Scheduler | None = _scheduler_cls() if _scheduler_cls else None
-        self.selected_count: int | None = None
-        self.underfill_policy: str = self.config.trainer.duet.underfill_policy or "short"
+        # _scheduler_cls = get_scheduler(self.config.trainer.duet.scheduler) 
+        # self.scheduler: Scheduler | None = _scheduler_cls() if _scheduler_cls else None
+
         self.candidate_buffer = None
-        print("=" * 80)
-        print(f"[DUET] Scheduler selected. {self.scheduler}")
-        print("=" * 80)
+        self.selected_count: int | None = None
+        self.scheduler_tracker: int = 0
+        self.scheduler: Scheduler | None = None
+        self.underfill_policy: str = self.config.trainer.duet.underfill_policy or "short"
+        self.num_workers: int = self.config.actor_rollout_ref.rollout.agent.num_workers or 8
+
+        self.interleave_schedulers: list[Scheduler] = []
+        for s in self.config.trainer.duet.scheduler_options:
+            assert s in default_schedulers.keys(), f"Invalid Scheduler: Scheduler ({s})"
+
+            _scheduler_cls = get_scheduler(s)
+            if _scheduler_cls:
+                valid_scheduler = _scheduler_cls()
+                self.interleave_schedulers.append(valid_scheduler)
+                print("=" * 80)
+                print(f"Appending Scheduler: {valid_scheduler}")
+                print("=" * 80)
+                print()
 
 
         if self.scheduler and not self.underfill_policy:
@@ -36,6 +59,21 @@ class DuetPPOTrainerSync(PPOTrainerSync):
                 "Valid options: short, refill"
             )
 
+
+    def scheduler_switch(self) -> Scheduler | None:
+        if not (self.scheduler_tracker < len(self.interleave_schedulers)):
+            # Snap back to the begining of the list if scheduler hits the end of the list
+            self.scheduler_tracker = 0
+
+        self.scheduler = self.interleave_schedulers[self.scheduler_tracker]
+        self.scheduler_tracker += 1 
+
+        print("=" * 80)
+        print(f"[DUET] Scheduler selected. {self.scheduler}")
+        print("=" * 80)
+
+
+
     def _add_batch_to_generate(self):
         """
         Overrides the original _add_batch_to_generate function.
@@ -48,9 +86,16 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         self.selected_count = None
         target_size = self.config.data.train_batch_size
 
+        self.scheduler_switch()
+
         if self.scheduler is None:
             batch = self._take_candidates(target_size)
             self.selected_count = len(batch)
+            tu.assign_non_tensor_data(
+                batch,
+                "global_steps",
+                self.global_steps,
+            )
             self._submit_batch_to_rollout(batch)
             return
 
@@ -64,14 +109,36 @@ class DuetPPOTrainerSync(PPOTrainerSync):
                 batch_size=target_size
             )
             batch = self.scheduler.reorder(batch)
+
+            batch = self.scheduler.pack(batch, pack_size=64)
+            batch = self.scheduler.assign(batch, self.num_workers)
+
             self.selected_count = len(batch)
+            tu.assign_non_tensor_data(
+                batch,
+                "global_steps",
+                self.global_steps,
+            )
             self._submit_batch_to_rollout(batch)
             return
 
         if self.underfill_policy == "refill":
             batch = self._generate_refill_batch(target_size)
             batch = self.scheduler.reorder(batch)
+
+            batch = self.scheduler.pack(batch, pack_size=64)
+            batch = self.scheduler.assign(batch, self.num_workers)
+
             self.selected_count = len(batch)
+            # ==========================================
+            # This is to stamp all items in the batch in 
+            # the current global steps
+            # ==========================================
+            tu.assign_non_tensor_data(
+                batch,
+                "global_steps",
+                self.global_steps,
+            )
             self._submit_batch_to_rollout(batch)
             return
 
@@ -215,12 +282,17 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         )
 
         for p_id, avg_reward in grouped_rewards.items():
-            if self.scheduler:
-                self.scheduler.update(
-                    p_id,
-                    self.global_steps,
-                    avg_reward,
-                )
+            for scheduler in self.interleave_schedulers:
+                scheduler.update(p_id, self.global_steps, avg_reward)
+                if hasattr(scheduler, 'save_history'):
+                    scheduler.save_history(self.global_steps)
+
+            # if self.scheduler:
+            #     self.scheduler.update(
+            #         p_id,
+            #         self.global_steps,
+            #         avg_reward,
+            #     )
 
     def _compute_group_rewards(
         self,
@@ -334,6 +406,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
                 "duet/prompts_selected": self.selected_count,
                 "duet/prompts_skipped_easy": scheduler_stats_snapshot.skipped_easy,
                 "duet/prompts_skipped_hard": scheduler_stats_snapshot.skipped_hard,
+                "duet/scheduler_selected": default_schedulers.get(self.scheduler.name, -1) if self.scheduler else -1
                 # "duet/prompts_considered": scheduler_stats_snapshot.considered,
 
             })
