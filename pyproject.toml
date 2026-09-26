@@ -8,11 +8,16 @@ dependencies = [
     "datasets>=5.0.0",
     "mlflow==3.12.0",
     "modal>=1.4.3",
+    "omegaconf>=2.3.1",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "ray>=2.57.0",
+    "tabulate>=0.10.0",
+    "tensordict>=0.13.0",
     "torch>=2.12.0",
     "torchaudio>=2.11.0",
     "torchvision>=0.27.0",
+    "transferqueue>=0.1.9",
     "transformers>=5.13.0",
 ]
 
@@ -21,4 +26,5 @@ dev = [
     "jupyter>=1.1.1",
     "notebook>=7.6.0",
     "openrouter>=0.9.1",
+    "pytest>=9.1.1",
 ]

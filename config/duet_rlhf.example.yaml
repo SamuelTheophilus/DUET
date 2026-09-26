@@ -1,0 +1,147 @@
+# @package _global_
+
+paths:
+  data_root: /data
+  code_root: /root
+  traces: test_traces
+
+  model: ${.data_root}/models/Qwen2.5-Math-1.5B
+
+  train_files: ${.data_root}/gsm8k/train.parquet
+  val_files: ${.data_root}/gsm8k/test.parquet
+
+  reward_file: ${.code_root}/duet/training/reward.py
+  rollout_dir: ${.data_root}/${.traces}/test_rollout_data
+  profiler: ${.data_root}/${.traces}
+
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+
+data:
+  train_files: ${paths.train_files}
+  val_files: ${paths.val_files}
+  max_prompt_length: 1024
+  max_response_length: 1024
+  filter_overlong_prompts: true
+  truncation: error
+
+  # Profiling overrides
+  shuffle: false
+  train_max_samples: 128
+  train_batch_size: 128
+
+reward:
+  custom_reward_function:
+    path: ${paths.reward_file}
+    name: custom_reward_function
+
+actor_rollout_ref:
+  model:
+    path: ${paths.model} 
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+
+  actor:
+    ppo_mini_batch_size: 256
+    ppo_micro_batch_size_per_gpu: 2
+    ppo_max_token_len_per_gpu: 3000
+    use_dynamic_bsz: true
+
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+
+    optim:
+      lr: 1e-6
+
+    fsdp_config:
+      param_offload: false
+      optimizer_offload: false
+
+    profiler:
+      enable: true
+      all_ranks: false
+      ranks: [0]
+      tool_config:
+        torch:
+          discrete: true
+          contents: [cpu, cuda]
+
+  rollout:
+    name: vllm
+    tensor_model_parallel_size: 1
+
+    gpu_memory_utilization: 0.3
+    enable_chunked_prefill: false
+    enforce_eager: false
+    free_cache_engine: true
+
+    n: 5
+    max_num_seqs: 512
+
+    log_prob_micro_batch_size_per_gpu: 2
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 4096
+
+    checkpoint_engine:
+      update_weights_bucket_megabytes: 256
+
+    profiler:
+      enable: true
+      all_ranks: false
+      ranks: [0]
+      tool_config:
+        torch:
+          discrete: true
+
+    agent:
+      agent_loop_manager_class: duet.scheduler.manager.MyAgentLoopManager
+
+  ref:
+    log_prob_micro_batch_size_per_gpu: 2
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 8192
+
+    fsdp_config:
+      param_offload: true
+
+trainer:
+  critic_warmup: 0
+
+  logger:
+    - console
+    - mlflow
+
+  project_name: verl_grpo_gsm8k_profile
+  experiment_name: qwen2.5_math_1.5b_fsdp_200steps
+
+  n_gpus_per_node: 1
+  nnodes: 1
+
+  save_freq: 20
+  test_freq: 5
+
+  # Profiling run
+  total_epochs: 3
+  total_training_steps: null
+
+  rollout_data_dir: ${paths.rollout_dir}
+
+  val_before_train: false
+
+  duet:
+    scheduler: length_only # length_only | difficulty_only | noops | joint
+    underfill_policy: short # short | refill
+
+global_profiler:
+  tool: torch
+  steps: [1]
+  save_path: ${paths.profiler}
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      worker_process_setup_hook: duet.training.profile_patch.patch_verl_for_profiling
