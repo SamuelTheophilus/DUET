@@ -73,3 +73,8 @@ DUET/
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/) or `pip`
 - A [Modal](https://modal.com) account
+
+
+### 4. Reporduction
+
+This section guides the user to reproduce the various runs and results that we claim in the paper. The main config file to alter is the duet_rlhf.yaml file for these various runs. 
