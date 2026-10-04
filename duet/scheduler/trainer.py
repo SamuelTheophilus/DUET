@@ -33,6 +33,8 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         self.scheduler: Scheduler | None = None
         self.underfill_policy: str = self.config.trainer.duet.underfill_policy or "short"
         self.num_workers: int = self.config.actor_rollout_ref.rollout.agent.num_workers or 8
+        self.cumulative_total_tokens: int = 0
+        self.cumulative_response_tokens: int = 0
 
         self.interleave_schedulers: list[Scheduler] = []
         for s in self.config.trainer.duet.scheduler_options:
@@ -284,15 +286,17 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         for p_id, avg_reward in grouped_rewards.items():
             for scheduler in self.interleave_schedulers:
                 scheduler.update(p_id, self.global_steps, avg_reward)
-                if hasattr(scheduler, 'save_history'):
-                    scheduler.save_history(self.global_steps)
 
-            # if self.scheduler:
-            #     self.scheduler.update(
-            #         p_id,
-            #         self.global_steps,
-            #         avg_reward,
-            #     )
+                # if hasattr(scheduler, 'save_history'):
+                #     scheduler.save_history(self.global_steps)
+                #
+        # Save reward history to disk
+        # _s is any scheduler.
+        _s = self.interleave_schedulers[0]
+        if _s and hasattr(_s, "save_history"):
+            _s.save_history(self.global_steps)
+
+
 
     def _compute_group_rewards(
         self,
@@ -410,6 +414,15 @@ class DuetPPOTrainerSync(PPOTrainerSync):
                 # "duet/prompts_considered": scheduler_stats_snapshot.considered,
 
             })
+
+        step_total_tokens = int(metrics.get("perf/total_num_tokens", 0) or 0)
+        step_response_tokens = int(metrics.get("duet/generated_response_tokens", 0) or 0)
+        self.cumulative_total_tokens += step_total_tokens
+        self.cumulative_response_tokens += step_response_tokens
+        metrics["duet/cumulative_total_tokens"] = self.cumulative_total_tokens
+        metrics["duet/cumulative_response_tokens"] = self.cumulative_response_tokens
+        metrics["duet/cumulative_optimizer_steps"] = self.global_steps
+
         return KVBatchMeta(partition_id=combined_partition_id, keys=combined_keys, tags=combined_tags)
 
     def _compute_metrics(
@@ -520,4 +533,3 @@ class DuetPPOTrainerSync(PPOTrainerSync):
 def install_duet_trainer():
     print(f"[DUET] replacing trainer: {TRAINER_REGISTRY['sync']} -> DuetPPOTrainerSync")
     TRAINER_REGISTRY["sync"] = DuetPPOTrainerSync
-

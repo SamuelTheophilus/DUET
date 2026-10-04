@@ -286,13 +286,9 @@ class DifficultyOnlyScheduler(Scheduler):
 
         print(f"INFO:[Selected Prompts]-> Easy prompts skipped {skip_easy_count}")
         print(f"INFO:[Selected Prompts]-> Hard prompts skipped {skip_hard_count}")
+
         if not selected_indices:
-            # TODO: what happens when there are no prompts selected? (i.e all the prompts are skipped)
-            # I'm thinking there should be some sort of minimum amount of prompts returned regardless.
-            raise NotImplementedError(
-                "DUET, not implemented logic for when all prompts are skipped"
-            )
-            # return pool[:0]
+            selected_indices = [pt for pt in range(batch_size)]
 
         # Record the last stats
         self.last_stats.selected += len(selected_indices)
