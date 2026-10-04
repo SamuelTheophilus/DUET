@@ -232,7 +232,7 @@ class DifficultyOnlyScheduler(Scheduler):
         # These should prolly be loaded from config.
         self.EASY_SKIP_PROBABILITY_THRESHOLD = 0.98
         self.HARD_SKIP_PROBABILITY_THRESHOLD = 0.11
-        self.BASELINE_PROBABILITY = 0.01
+        self.BASELINE_PROBABILITY = 0.05
 
         self.last_stats: SelectPromptStats = SelectPromptStats()
 
