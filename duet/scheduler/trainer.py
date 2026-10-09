@@ -305,7 +305,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
 
 
         for p_id, avg_reward in grouped_rewards.items():
-            mean_response_length = mean_response_lengths_by_prompt_id.get(p_id)
+            mean_response_length = mean_response_lengths_by_prompt_id.get(p_id) or 800 # 800 -> global mean response length used for cold starts
             for scheduler in self.interleave_schedulers:
                 scheduler.update(p_id, self.global_steps, avg_reward, mean_response_length)
 

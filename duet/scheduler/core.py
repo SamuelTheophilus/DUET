@@ -155,6 +155,7 @@ class LengthOnlyScheduler(Scheduler):
     def __init__(self):
         self.last_stats: SelectPromptStats | None = SelectPromptStats()
         self.data = defaultdict(list)
+        self.global_mean_response_length = 800.0
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print(f"[{self.name}] filtering prompts. (Fall through).")
@@ -167,16 +168,17 @@ class LengthOnlyScheduler(Scheduler):
         an entire step (rollout, reward-calc, advantage-calc, training) in the GRPO step.
         This introduces some off-policy-ness and uses KL-penalty adjustment.
         """
-        print(f"[{self.name}] reordering prompts")
-        indices = sorted(
-            # Sorting this way returns the position of the indicies which can be used to "reshuffle"
-            # the prompts in this manner: prompts[indices]. Doing it this way to preserve the output as a
-            # TensorDict and not a list.
-            range(len(prompts)),
-            key=lambda i: prompts[i]["extra_info"].get("predicted_response_length", 0),
-        )
-
-        return prompts[indices]
+        return super().reorder(prompts)
+        # print(f"[{self.name}] reordering prompts")
+        # indices = sorted(
+        #     # Sorting this way returns the position of the indicies which can be used to "reshuffle"
+        #     # the prompts in this manner: prompts[indices]. Doing it this way to preserve the output as a
+        #     # TensorDict and not a list.
+        #     range(len(prompts)),
+        #     key=lambda i: prompts[i]["extra_info"].get("Predicted_response_length", 0),
+        # )
+        #
+        # return prompts[indices]
 
     def pack(self, prompts, pack_size):
         print(f"[{self.name}] packing prompts into mini-batches of size {pack_size}")
@@ -229,22 +231,33 @@ class LengthOnlyScheduler(Scheduler):
         return torch.cat(assigned_buckets, dim=0)
 
 
-    def _bucket_weight(self, bucket: TensorDict) -> int:
+    def _bucket_weight(self, bucket: TensorDict) -> float:
         weight = 0
 
         for prompt in bucket:
             prompt_id = prompt["prompt_id"]
             history = self.data[prompt_id]
-            response_length = history[-1]["response_length"] if history else 0
-            weight += response_length
+            if not history:
+                weight += self.global_mean_response_length
+            else:
+                historical_response_lengths = [r["response_length"] for r in history]
+                weight += calculate_ewma(historical_response_lengths, 0.9)
 
         return weight
 
 
-        # return sum(
-        #     prompt["extra_info"].get("predicted_response_length", 0)
-        #     for prompt in bucket
-        # )
+def calculate_ewma(
+    numbers: list[float], 
+    alpha: float
+):
+
+    if len(numbers) == 1:
+        return numbers[0]
+
+    lower_alpha = 1 - alpha
+    raw_ewma = (alpha * numbers[-1]) + (lower_alpha * calculate_ewma(numbers[:-1], alpha))
+    return round(raw_ewma, 2)
+
 
 
 class DifficultyOnlyScheduler(Scheduler):
