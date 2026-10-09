@@ -268,7 +268,11 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         data = tq.kv_batch_get(
             keys=real_keys,
             partition_id=batch.partition_id,
-            select_fields=["prompt_id", "rm_scores"]
+            select_fields=[
+                "prompt_id", 
+                "rm_scores",
+                "responses"
+            ]
         )
 
         prompt_ids = list(data["prompt_id"])
@@ -283,18 +287,46 @@ class DuetPPOTrainerSync(PPOTrainerSync):
             data["rm_scores"],
         )
 
-        for p_id, avg_reward in grouped_rewards.items():
-            for scheduler in self.interleave_schedulers:
-                scheduler.update(p_id, self.global_steps, avg_reward)
 
-                # if hasattr(scheduler, 'save_history'):
-                #     scheduler.save_history(self.global_steps)
-                #
+
+
+        # =========================================
+        # Calculate the mean response length for 
+        # each prompt
+        # ========================================
+        responses = data.get("responses")
+        mean_response_lengths_by_prompt_id = self._compute_mean_response_lengths(
+            prompt_ids=prompt_ids,
+            response_lengths=responses.offsets().diff()
+        ) if responses is not None else {}
+        
+        if not mean_response_lengths_by_prompt_id:
+            print("[duet] mean_response_lengths_by_prompt_id is not present.")
+
+
+        for p_id, avg_reward in grouped_rewards.items():
+            mean_response_length = mean_response_lengths_by_prompt_id.get(p_id)
+            for scheduler in self.interleave_schedulers:
+                scheduler.update(p_id, self.global_steps, avg_reward, mean_response_length)
+
         # Save reward history to disk
-        # _s is any scheduler.
         _s = self.interleave_schedulers[0]
         if _s and hasattr(_s, "save_history"):
             _s.save_history(self.global_steps)
+
+    def _compute_mean_response_lengths(self, prompt_ids, response_lengths):
+        if not len(prompt_ids) == len(response_lengths):
+            return {}
+        
+        length_by_prompt_ids = defaultdict(list)
+        for p_id, token_length in zip(prompt_ids, response_lengths.tolist()):
+            length_by_prompt_ids[p_id].append(token_length)
+
+        return {
+            p_id: sum(rollout_tokens) / len(rollout_tokens)
+            for p_id, rollout_tokens in length_by_prompt_ids.items()
+        }
+
 
 
 

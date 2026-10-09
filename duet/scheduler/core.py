@@ -71,7 +71,7 @@ class Scheduler(ABC):
         """
         return [prompts[i : i + pack_size] for i in range(0, len(prompts), pack_size)]
 
-    def update(self, prompt_id, step, observed_reward):
+    def update(self, prompt_id, step, observed_reward, mean_response_length = None):
         """
         Updates the streak history of every prompt at each step.
         Used primarily by the difficulty only scheduler
@@ -112,12 +112,17 @@ class NoOpScheduler(Scheduler):
     #     super().update(prompt_id, step, observed_reward)
     #
 
-    def update(self, prompt_id, step, observed_reward):
+    def update(self, prompt_id, step, observed_reward, mean_response_length = None):
             """
             Records the step and reward for each prompt after rewards have been generated
             (i.e in the reward generation step).
             """
-            self.data[prompt_id].append((step, observed_reward))
+            self.data[prompt_id].append({
+                "step": step, 
+                "reward": observed_reward, 
+                "response_length": mean_response_length
+            })
+            # self.data[prompt_id].append((step, observed_reward, mean_response_length))
 
 
 
@@ -149,6 +154,7 @@ class LengthOnlyScheduler(Scheduler):
 
     def __init__(self):
         self.last_stats: SelectPromptStats | None = SelectPromptStats()
+        self.data = defaultdict(list)
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print(f"[{self.name}] filtering prompts. (Fall through).")
@@ -176,8 +182,15 @@ class LengthOnlyScheduler(Scheduler):
         print(f"[{self.name}] packing prompts into mini-batches of size {pack_size}")
         return super().pack(prompts, pack_size)
 
-    def update(self, prompt_id, step, observed_reward):
-        pass
+
+    def update(self, prompt_id, step, observed_reward, mean_response_length = None):
+
+        self.data[prompt_id].append({
+            "step": step, 
+            "reward": observed_reward, 
+            "response_length": mean_response_length
+        })
+
 
     def assign(
         self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
@@ -215,12 +228,23 @@ class LengthOnlyScheduler(Scheduler):
 
         return torch.cat(assigned_buckets, dim=0)
 
-    def _bucket_weight(self, bucket: TensorDict) -> int:
 
-        return sum(
-            prompt["extra_info"].get("predicted_response_length", 0)
-            for prompt in bucket
-        )
+    def _bucket_weight(self, bucket: TensorDict) -> int:
+        weight = 0
+
+        for prompt in bucket:
+            prompt_id = prompt["prompt_id"]
+            history = self.data[prompt_id]
+            response_length = history[-1]["response_length"] if history else 0
+            weight += response_length
+
+        return weight
+
+
+        # return sum(
+        #     prompt["extra_info"].get("predicted_response_length", 0)
+        #     for prompt in bucket
+        # )
 
 
 class DifficultyOnlyScheduler(Scheduler):
@@ -288,7 +312,8 @@ class DifficultyOnlyScheduler(Scheduler):
         print(f"INFO:[Selected Prompts]-> Hard prompts skipped {skip_hard_count}")
 
         if not selected_indices:
-            selected_indices = [pt for pt in range(batch_size)]
+            min_size = min(batch_size, len(pool))
+            selected_indices = [pt for pt in range(min_size)]
 
         # Record the last stats
         self.last_stats.selected += len(selected_indices)
@@ -329,7 +354,8 @@ class DifficultyOnlyScheduler(Scheduler):
 
         count = 0
 
-        for _, reward in reversed(reward_history):
+        for record in reversed(reward_history):
+            reward = record["reward"]
             if reward < self.EASY_SKIP_PROBABILITY_THRESHOLD:
                 break
 
@@ -362,7 +388,7 @@ class DifficultyOnlyScheduler(Scheduler):
         prompt_id = prompt["prompt_id"]
         reward_history = self.data[prompt_id]
 
-        latest_reward = reward_history[-1][1]
+        latest_reward = reward_history[-1]["reward"]
 
         # The current result is not hard.
         if latest_reward > self.HARD_SKIP_PROBABILITY_THRESHOLD:
@@ -370,7 +396,8 @@ class DifficultyOnlyScheduler(Scheduler):
 
         count = 0
 
-        for _, reward in reversed(reward_history):
+        for record in reversed(reward_history):
+            reward = record["reward"]
             if reward > self.HARD_SKIP_PROBABILITY_THRESHOLD:
                 break
 
@@ -383,12 +410,17 @@ class DifficultyOnlyScheduler(Scheduler):
 
         return torch.rand(()).item() < skip_probability
 
-    def update(self, prompt_id, step, observed_reward):
+    def update(self, prompt_id, step, observed_reward, mean_response_length = None):
         """
         Records the step and reward for each prompt after rewards have been generated
         (i.e in the reward generation step).
         """
-        self.data[prompt_id].append((step, observed_reward))
+        
+        self.data[prompt_id].append({
+                "step": step, 
+                "reward": observed_reward, 
+                "response_length": mean_response_length
+            })
 
 
     def save_history(self, step: int) -> None:
@@ -428,8 +460,13 @@ class JointScheduler(Scheduler):
     def pack(self, prompts, pack_size):
         return super().pack(prompts, pack_size)
 
-    def update(self, prompt_id, step, observed_reward):
-        self.difficulty_scheduler.update(prompt_id, step, observed_reward)
+    def update(self, prompt_id, step, observed_reward, mean_response_length = None):
+        self.difficulty_scheduler.update(prompt_id, step, observed_reward, mean_response_length)
+
+
+    def save_history(self, step: int) -> None:
+        self.difficulty_scheduler.save_history(step)
+
 
     def assign(
         self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"

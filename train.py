@@ -62,7 +62,6 @@ def initialize_run_directories(
         run_dir = Path("/data/runs") / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
-
     nvidia_cmd = ["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"]
     gpu_uuid = subprocess.check_output(nvidia_cmd).decode("utf-8").strip()
 
@@ -177,18 +176,22 @@ SWEEP_MATRIX = [
 @app.function(
     gpu="a100-40gb",
     volumes={VOLUME_MOUNT: volume},
-    timeout=4 * 3600,
+    timeout=24 * 3600,
     memory=65536,
 )
 def _profile(
     run_id: str,
     run_description: str,
-    overrides: list[str] = [],
+    overrides: list[str] | None = None,
     test: bool = False,
 ):
     import subprocess
-    import socket
+    from pathlib import Path
+
     from duet.training import train_cmd
+
+    if overrides is None:
+        overrides = []
 
     print(f"[{run_id}] starting — overrides: {overrides}", flush=True)
 
@@ -203,8 +206,28 @@ def _profile(
 
     save_train_config(cmd, env)
 
-    subprocess.run(cmd, check=True, env=env)
-    volume.commit()
+    run_dir = Path(env["DUET_RUN_DIR"])
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / "train.log"
+
+    (run_dir / "command.txt").write_text(" ".join(cmd) + "\n")
+    env["PYTHONUNBUFFERED"] = "1"
+
+    command = " ".join(cmd)
+
+    try:
+        subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                f"{command} 2>&1 | tee -a {log_path}",
+            ],
+            check=True,
+            env=env,
+        )
+    finally:
+        volume.commit()
 
     print(f"[{run_id}] done", flush=True)
 
@@ -215,42 +238,42 @@ def main(
     setup: bool = False,
     force: bool = False,
     profile: bool = False,
-    sweep: bool = False,
+    # sweep: bool = False,
     test: bool = False,
 ):
     if setup:
         _setup.remote(force)
         return
 
-    if sweep:
-        description = input("Enter a description for this sweep:\n\n").strip()
-        if not description:
-            description = "[NO SWEEP DESCRIPTION PROVIDED]"
-
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-        handles = []
-        for exp in SWEEP_MATRIX:
-            run_id = f"{timestamp}_{exp['scheduler']}_seed{exp['seed']}"
-            overrides = [
-                f"trainer.duet.scheduler={exp['scheduler']}",
-                f"custom_config.seed={exp['seed']}",
-            ]
-            h = _profile.spawn(
-                run_id=run_id,
-                run_description=description,
-                overrides=overrides,
-                test=test,
-            )
-            handles.append((run_id, h))
-            print(f"Spawned: {run_id}")
-
-        print(f"\n{len(handles)} runs launched. Waiting for all to complete...\n")
-        for run_id, h in handles:
-            h.get()
-            print(f"Completed: {run_id}")
-        return
-
+    # if sweep:
+    #     description = input("Enter a description for this sweep:\n\n").strip()
+    #     if not description:
+    #         description = "[NO SWEEP DESCRIPTION PROVIDED]"
+    #
+    #     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    #
+    #     handles = []
+    #     for exp in SWEEP_MATRIX:
+    #         run_id = f"{timestamp}_{exp['scheduler']}_seed{exp['seed']}"
+    #         overrides = [
+    #             f"trainer.duet.scheduler={exp['scheduler']}",
+    #             f"custom_config.seed={exp['seed']}",
+    #         ]
+    #         h = _profile.spawn(
+    #             run_id=run_id,
+    #             run_description=description,
+    #             overrides=overrides,
+    #             test=test,
+    #         )
+    #         handles.append((run_id, h))
+    #         print(f"Spawned: {run_id}")
+    #
+    #     print(f"\n{len(handles)} runs launched. Waiting for all to complete...\n")
+    #     for run_id, h in handles:
+    #         h.get()
+    #         print(f"Completed: {run_id}")
+    #     return
+    #
     if train_type not in TRAIN_TYPES:
         raise ValueError(
             f"Unknown --train-type '{train_type}'. Choose from: {TRAIN_TYPES}"
@@ -258,6 +281,6 @@ def main(
 
     run_id, description = make_run_info(test=test)
     if profile:
-        _profile.remote(run_id, description, test=test)
+        _profile.spawn(run_id, description, test=test)
     else:
         _train.remote(train_type)
