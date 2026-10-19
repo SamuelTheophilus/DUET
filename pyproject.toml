@@ -28,3 +28,9 @@ dev = [
     "openrouter>=0.9.1",
     "pytest>=9.1.1",
 ]
+
+analysis = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+]
