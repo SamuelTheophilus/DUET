@@ -180,6 +180,7 @@ class LengthOnlyScheduler(Scheduler):
         # self.data = defaultdict(list)
         self.data = load_streak_history(dir)
         self.global_mean_response_length = 800.0
+        self.ewma_alpha = 0.3
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print(f"[{self.name}] filtering prompts. (Fall through).")
@@ -265,7 +266,7 @@ class LengthOnlyScheduler(Scheduler):
                 weight += self.global_mean_response_length
             else:
                 historical_response_lengths = [r["response_length"] for r in history]
-                weight += calculate_ewma(historical_response_lengths, 0.9)
+                weight += calculate_ewma(historical_response_lengths, self.ewma_alpha)
 
         return weight
 
@@ -275,12 +276,19 @@ def calculate_ewma(
     alpha: float
 ):
 
-    if len(numbers) == 1:
-        return numbers[0]
+    count = len(numbers)
+    current_ewma = 0
 
-    lower_alpha = 1 - alpha
-    raw_ewma = (alpha * numbers[-1]) + (lower_alpha * calculate_ewma(numbers[:-1], alpha))
-    return round(raw_ewma, 2)
+    for idx in range(count):
+        val = numbers[idx]
+
+        part_1 = val if idx==0 else val * alpha 
+        part_2 = (1 - alpha) * current_ewma
+
+        current_ewma = part_1 + part_2
+
+    return round(current_ewma , 2)
+
 
 
 
@@ -352,6 +360,7 @@ class DifficultyOnlyScheduler(Scheduler):
 
         if not selected_indices:
             min_size = min(batch_size, len(pool))
+            print(f"All prompts were skipped. Returning default size => {min_size}")
             selected_indices = [pt for pt in range(min_size)]
 
         # Record the last stats
