@@ -88,13 +88,36 @@ class Scheduler(ABC):
         return torch.cat(buckets, dim=0)
 
 
+
+
+def load_streak_history(dir: Path | None):
+    if dir is None:
+        return defaultdict(list)
+
+    if not dir.exists():
+        raise FileNotFoundError
+
+    try:
+        with dir.open("r") as f:
+            streak = json.load(f)
+            print("Retrieved streak successfully")
+            return defaultdict(list, streak)
+
+    except Exception as err:
+        print(f"Error occured when loading streak history {str(err)}")
+        raise 
+
+
+
+
 class NoOpScheduler(Scheduler):
     name: str = "noops"
 
-    def __init__(self) -> None:
+    def __init__(self, dir: Path | None = None) -> None:
         self.mini_batch_size = 8  # This is passed in the config of the user.
         self.last_stats: SelectPromptStats | None = SelectPromptStats()
-        self.data: dict  = defaultdict(list)
+        # self.data: dict  = defaultdict(list)
+        self.data: dict[str, list] = load_streak_history(dir)
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print("[NoOpScheduler]: selecting prompts")
@@ -152,9 +175,10 @@ class NoOpScheduler(Scheduler):
 class LengthOnlyScheduler(Scheduler):
     name: str = "length_only"
 
-    def __init__(self):
+    def __init__(self, dir: Path | None = None):
         self.last_stats: SelectPromptStats | None = SelectPromptStats()
-        self.data = defaultdict(list)
+        # self.data = defaultdict(list)
+        self.data = load_streak_history(dir)
         self.global_mean_response_length = 800.0
 
     def select_prompts(self, pool, batch_size, **kwargs):
@@ -263,9 +287,11 @@ def calculate_ewma(
 class DifficultyOnlyScheduler(Scheduler):
     name: str = "difficulty_only"
 
-    def __init__(self):
+    def __init__(self, dir: Path | None = None):
         super().__init__()
-        self.data: dict = defaultdict(list)
+        # self.data: dict = defaultdict(list)
+        self.data: dict = load_streak_history(dir)
+
         # These should prolly be loaded from config.
         self.EASY_SKIP_PROBABILITY_THRESHOLD = 0.98
         self.HARD_SKIP_PROBABILITY_THRESHOLD = 0.11
@@ -459,9 +485,9 @@ class DifficultyOnlyScheduler(Scheduler):
 class JointScheduler(Scheduler):
     name: str = "joint"
 
-    def __init__(self) -> None:
+    def __init__(self, dir: Path | None = None) -> None:
         super().__init__()
-        self.difficulty_scheduler = DifficultyOnlyScheduler()
+        self.difficulty_scheduler = DifficultyOnlyScheduler(dir=dir)
         self.length_scheduler = LengthOnlyScheduler()
 
     def select_prompts(self, pool, batch_size, **kwargs):

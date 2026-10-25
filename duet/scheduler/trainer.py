@@ -10,6 +10,7 @@ from transfer_queue import KVBatchMeta
 from collections import defaultdict, Counter
 
 from .core import Scheduler, get_scheduler
+from pathlib import Path
 
 
 default_schedulers = {
@@ -36,13 +37,18 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         self.cumulative_total_tokens: int = 0
         self.cumulative_response_tokens: int = 0
 
+
+        resume_file = self.config.trainer.duet.get("resume_from_file")
+        self.latest_streak_file: Path | None = Path(resume_file) if resume_file else None
+
+
         self.interleave_schedulers: list[Scheduler] = []
         for s in self.config.trainer.duet.scheduler_options:
             assert s in default_schedulers.keys(), f"Invalid Scheduler: Scheduler ({s})"
 
             _scheduler_cls = get_scheduler(s)
             if _scheduler_cls:
-                valid_scheduler = _scheduler_cls()
+                valid_scheduler = _scheduler_cls(self.latest_streak_file)
                 self.interleave_schedulers.append(valid_scheduler)
                 print("=" * 80)
                 print(f"Appending Scheduler: {valid_scheduler}")

@@ -48,7 +48,6 @@ def initialize_run_directories(
     import socket
     from pathlib import Path
 
-
     if test:
         run_dir = Path("/data/runs/test")
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -68,8 +67,6 @@ def initialize_run_directories(
     container_hostname = f"--- Container Hostname {socket.gethostname()}"
     gpu_uuid_record = f"--- GPU UUID {gpu_uuid}"
 
-
-
     # ======================================
     # Writing description of the run.
     # ======================================
@@ -83,7 +80,6 @@ def initialize_run_directories(
     mlflow_dir = Path("/data/mlflow")
     mlflow_dir.mkdir(parents=True, exist_ok=True)
 
-
     # Creating the streak directory
     streak_dir = run_dir / "prompt_streak"
     env["PROMPT_STREAK_DIR"] = str(streak_dir)
@@ -92,9 +88,6 @@ def initialize_run_directories(
     env["MLFLOW_TRACKING_URI"] = f"sqlite:////data/mlflow/{run_id}.db"
     env["VLLM_LOGGING_LEVEL"] = "INFO"
     env["HYDRA_FULL_ERROR"] = "1"
-
-
-    
 
     return env
 
@@ -203,7 +196,6 @@ def _profile(
 
     cmd = train_cmd(overrides=overrides)
 
-
     save_train_config(cmd, env)
 
     run_dir = Path(env["DUET_RUN_DIR"])
@@ -221,7 +213,7 @@ def _profile(
             [
                 "/bin/bash",
                 "-c",
-                f"{command} 2>&1 | tee -a {log_path}",
+                f"set -o pipefail; {command} 2>&1 | tee -a {log_path}",
             ],
             check=True,
             env=env,
@@ -238,42 +230,13 @@ def main(
     setup: bool = False,
     force: bool = False,
     profile: bool = False,
-    # sweep: bool = False,
     test: bool = False,
+    overrides: str = "" # Pass override args to the training command
 ):
     if setup:
         _setup.remote(force)
         return
 
-    # if sweep:
-    #     description = input("Enter a description for this sweep:\n\n").strip()
-    #     if not description:
-    #         description = "[NO SWEEP DESCRIPTION PROVIDED]"
-    #
-    #     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    #
-    #     handles = []
-    #     for exp in SWEEP_MATRIX:
-    #         run_id = f"{timestamp}_{exp['scheduler']}_seed{exp['seed']}"
-    #         overrides = [
-    #             f"trainer.duet.scheduler={exp['scheduler']}",
-    #             f"custom_config.seed={exp['seed']}",
-    #         ]
-    #         h = _profile.spawn(
-    #             run_id=run_id,
-    #             run_description=description,
-    #             overrides=overrides,
-    #             test=test,
-    #         )
-    #         handles.append((run_id, h))
-    #         print(f"Spawned: {run_id}")
-    #
-    #     print(f"\n{len(handles)} runs launched. Waiting for all to complete...\n")
-    #     for run_id, h in handles:
-    #         h.get()
-    #         print(f"Completed: {run_id}")
-    #     return
-    #
     if train_type not in TRAIN_TYPES:
         raise ValueError(
             f"Unknown --train-type '{train_type}'. Choose from: {TRAIN_TYPES}"
@@ -281,6 +244,10 @@ def main(
 
     run_id, description = make_run_info(test=test)
     if profile:
-        _profile.spawn(run_id, description, test=test)
+        _profile.spawn(
+            run_id,
+            description,
+            overrides=overrides.split(),
+            test=test)
     else:
         _train.remote(train_type)
