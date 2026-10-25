@@ -1,6 +1,9 @@
 import os
 import sys
+import math
 
+from verl.utils import tensordict_utils as tu
+from verl.utils.metric.utils import Metric
 
 from ..scheduler.trainer import install_duet_trainer
 from .vllm_metrics_logger import log_phase
@@ -257,10 +260,115 @@ def patch_vllm_stat_logger(module):
         flush=True,
     )
 
+def patch_train_batch(module):
+    TrainingWorker = module.TrainingWorker
+
+    _original_train_batch = TrainingWorker.train_batch
+    def debug_train_batch(self, data):
+        print(
+            f"[DUET_MINIBATCH] "
+            f"dp_rank={self.engine.get_data_parallel_rank()} "
+            f"responses={data.shape[0]}",
+            flush=True,
+        )
+        return _original_train_batch(self, data)
+
+    TrainingWorker.train_batch = debug_train_batch
+
+
+    _original_train_mini_batch = TrainingWorker.train_mini_batch
+
+    def debug_train_mini_batch(self, *args, **kwargs):
+        before = getattr(self.engine, "duet_successful_updates", 0)
+
+        result = _original_train_mini_batch(self, *args, **kwargs)
+
+        after = getattr(self.engine, "duet_successful_updates", 0)
+        updates = after - before
+
+        if result is not None:
+            metrics = tu.get(result, "metrics")
+
+            metrics["duet_successful_updates"] = Metric(
+                aggregation="sum",
+                value=updates,
+            )
+
+            tu.assign_non_tensor(result, metrics=metrics)
+
+        print(
+            f"[DUET_UPDATE_COUNT] updates={updates}",
+            flush=True,
+        )
+
+        return result
+
+    TrainingWorker.train_mini_batch = debug_train_mini_batch
+
+# import math
+def patch_fsdp_optimizer_step(module):
+
+    FSDPEngine = module.FSDPEngine
+
+
+    _original_optimizer_step = FSDPEngine.optimizer_step
+
+    def debug_optimizer_step(self):
+        grad_norm = _original_optimizer_step(self)
+
+        if getattr(self, "scaler", None) is not None:
+            raise RuntimeError(
+                "DUET update counter requires separate AMP scaler handling"
+            )
+
+        successful = math.isfinite(grad_norm)
+
+        self.duet_successful_updates = (
+            getattr(self, "duet_successful_updates", 0)
+            + int(successful)
+        )
+
+        print(
+            f"[DUET_OPTIMIZER] "
+            f"success={successful} "
+            f"grad_norm={grad_norm:.6f} "
+            f"cumulative={self.duet_successful_updates}",
+            flush=True,
+        )
+
+        return grad_norm
+
+    FSDPEngine.optimizer_step = debug_optimizer_step
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # =================================================================================
 # Core monkey patching function.
 # =================================================================================
+
 
 
 def patch_verl_for_profiling():
@@ -272,6 +380,9 @@ def patch_verl_for_profiling():
         "verl.trainer.ppo.v1.agent_loop_tq": patch_agent_loop_worker_timing,
         "verl.workers.rollout.llm_server": patch_llm_request_timing,
         "vllm.v1.engine.async_llm": patch_vllm_stat_logger,
+        "verl.workers.engine_workers": patch_train_batch,
+        "verl.workers.engine.fsdp.transformer_impl": patch_fsdp_optimizer_step
+
     }
     patched = set()
 

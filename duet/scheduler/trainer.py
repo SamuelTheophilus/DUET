@@ -311,7 +311,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
 
 
         for p_id, avg_reward in grouped_rewards.items():
-            mean_response_length = mean_response_lengths_by_prompt_id.get(p_id) or 800 # 800 -> global mean response length used for cold starts
+            mean_response_length = mean_response_lengths_by_prompt_id.get(p_id, 800) if mean_response_lengths_by_prompt_id is None else 800 # 800 -> global mean response length used for cold starts
             for scheduler in self.interleave_schedulers:
                 scheduler.update(p_id, self.global_steps, avg_reward, mean_response_length)
 
@@ -332,6 +332,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
             p_id: sum(rollout_tokens) / len(rollout_tokens)
             for p_id, rollout_tokens in length_by_prompt_ids.items()
         }
+
 
 
 
@@ -459,7 +460,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         self.cumulative_response_tokens += step_response_tokens
         metrics["duet/cumulative_total_tokens"] = self.cumulative_total_tokens
         metrics["duet/cumulative_response_tokens"] = self.cumulative_response_tokens
-        metrics["duet/cumulative_optimizer_steps"] = self.global_steps
+        # metrics["duet/cumulative_optimizer_steps"] = self.global_steps
 
         return KVBatchMeta(partition_id=combined_partition_id, keys=combined_keys, tags=combined_tags)
 
@@ -566,6 +567,17 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         metrics["response_length/at_cap"] = int(
             (response_lengths == self.config.data.max_response_length).sum().item()
         )
+
+
+    def _update_actor(self, batch, metrics):
+        result = super()._update_actor(batch, metrics)
+        try:
+            updates = int(metrics.pop("actor/duet_successful_updates"))
+            metrics["duet/num_updates_per_step"] = updates
+        except Exception as error:
+            print(f"[duet] error: Error occurred when fetching the optimizer updates {str(error)}")
+
+        return result
 
 
 def install_duet_trainer():
