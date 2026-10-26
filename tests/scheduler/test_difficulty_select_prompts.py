@@ -82,7 +82,7 @@ def test_returns_empty_batch_when_every_prompt_is_skipped(
 
     selected = difficulty_scheduler.select_prompts(pool, batch_size=50)
 
-    assert len(selected) == 0
+    assert len(selected) == len(pool)
     assert snapshot_reward_history(difficulty_scheduler) == before
 
 

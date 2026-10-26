@@ -305,13 +305,16 @@ class DuetPPOTrainerSync(PPOTrainerSync):
             prompt_ids=prompt_ids,
             response_lengths=responses.offsets().diff()
         ) if responses is not None else {}
-        
+
         if not mean_response_lengths_by_prompt_id:
             print("[duet] mean_response_lengths_by_prompt_id is not present.")
 
 
         for p_id, avg_reward in grouped_rewards.items():
-            mean_response_length = mean_response_lengths_by_prompt_id.get(p_id, 800) if mean_response_lengths_by_prompt_id is None else 800 # 800 -> global mean response length used for cold starts
+            mean_response_length = mean_response_lengths_by_prompt_id.get(p_id)
+            if mean_response_length is None:
+                mean_response_length = 800 # 800 -> global mean response length used for cold starts
+
             for scheduler in self.interleave_schedulers:
                 scheduler.update(p_id, self.global_steps, avg_reward, mean_response_length)
 
@@ -323,7 +326,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
     def _compute_mean_response_lengths(self, prompt_ids, response_lengths):
         if not len(prompt_ids) == len(response_lengths):
             return {}
-        
+
         length_by_prompt_ids = defaultdict(list)
         for p_id, token_length in zip(prompt_ids, response_lengths.tolist()):
             length_by_prompt_ids[p_id].append(token_length)
