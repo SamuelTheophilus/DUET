@@ -218,6 +218,18 @@ class LengthOnlyScheduler(Scheduler):
             "response_length": mean_response_length
         })
 
+    def save_history(self, step: int) -> None:
+        streak_dir_str = os.environ.get("PROMPT_STREAK_DIR")
+        if not streak_dir_str:
+            return
+
+        streak_dir = Path(streak_dir_str)
+        if not streak_dir.is_dir():
+            return
+
+        with (streak_dir / f"{step}.json").open("w") as f:
+            json.dump(self.data, f)
+
 
     def assign(
         self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
