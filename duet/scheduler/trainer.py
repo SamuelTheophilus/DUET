@@ -49,7 +49,11 @@ class DuetPPOTrainerSync(PPOTrainerSync):
 
             _scheduler_cls = get_scheduler(s)
             if _scheduler_cls:
-                valid_scheduler = _scheduler_cls(self.latest_streak_file)
+                if s == "length_only":
+                    lpt_order: str = self.config.trainer.duet.get("lpt_order", "longest")
+                    valid_scheduler = _scheduler_cls(self.latest_streak_file, order=lpt_order)
+                else:
+                    valid_scheduler = _scheduler_cls(self.latest_streak_file)
                 self.interleave_schedulers.append(valid_scheduler)
                 print("=" * 80)
                 print(f"Appending Scheduler: {valid_scheduler}")

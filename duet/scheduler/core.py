@@ -178,13 +178,15 @@ class LengthOnlyScheduler(Scheduler):
     def __init__(
         self, 
         dir: Path | None = None,
-        order: str = "longest"
+        **kwargs,
+        # order: str = "longest"
     ):
         self.last_stats: SelectPromptStats | None = SelectPromptStats()
         self.data = load_streak_history(dir)
         self.global_mean_response_length = 800.0
         self.ewma_alpha = 0.3
 
+        order = kwargs.get("order", "longest")
         if order not in { "longest", "shortest" }:
             raise ValueError(f"Unknown order provided: {order}")
 
