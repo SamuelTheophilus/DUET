@@ -36,6 +36,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         self.num_workers: int = self.config.actor_rollout_ref.rollout.agent.num_workers or 8
         self.cumulative_total_tokens: int = 0
         self.cumulative_response_tokens: int = 0
+        self.prompts_topped_up: int = 0
 
 
         resume_file = self.config.trainer.duet.get("resume_from_file")
@@ -92,6 +93,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
         # Core scheduler calls prior to rollout.
         #================================================
         self.selected_count = None
+        self.prompts_topped_up = 0
         target_size = self.config.data.train_batch_size
 
         self.scheduler_switch()
@@ -243,10 +245,28 @@ class DuetPPOTrainerSync(PPOTrainerSync):
             )
 
         if selected_count < target_size:
-           raise RuntimeError(
-                f"DUET refill failed: selected {selected_count}/"
-                f"{target_size} after {max_rounds} refill rounds"
+
+            # Top-up the batch with the skipped prompts
+            top_up_needed = target_size - selected_count
+            selected_ids = {
+                prompt_id
+                for chunk in selected_chunks
+                for prompt_id in chunk["prompt_id"]
+            }
+
+
+            top_up = self.scheduler.top_up(
+                count=top_up_needed,
+                exclude_prompt_ids=selected_ids
             )
+
+            if len(top_up) != top_up_needed:
+                raise RuntimeError(
+                    f"Needed {top_up_needed} top up prompts; scheduler returned {len(top_up)}" 
+                )
+
+            selected_chunks.append(top_up)
+            self.prompts_topped_up = len(top_up)
  
         if len(selected_chunks) == 1:
             return selected_chunks[0]
@@ -452,6 +472,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
                 "duet/prompts_selected": self.selected_count,
                 "duet/prompts_skipped_easy": scheduler_stats_snapshot.skipped_easy,
                 "duet/prompts_skipped_hard": scheduler_stats_snapshot.skipped_hard,
+                "duet/prompts_topped_up": self.prompts_topped_up,
                 "duet/scheduler_selected": default_schedulers.get(self.scheduler.name, -1) if self.scheduler else -1
                 # "duet/prompts_considered": scheduler_stats_snapshot.considered,
 

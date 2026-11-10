@@ -318,9 +318,11 @@ class DifficultyOnlyScheduler(Scheduler):
         self.BASELINE_PROBABILITY = 0.05
 
         self.last_stats: SelectPromptStats = SelectPromptStats()
+        self.skipped_this_step: list[TensorDict] = []
 
     def reset_stats(self):
         self.last_stats = SelectPromptStats()
+        self.skipped_this_step = []
 
     def select_prompts(
         self,
@@ -359,10 +361,12 @@ class DifficultyOnlyScheduler(Scheduler):
 
             if self._skip_easy_prompts(prompt, base_prob=easy_base_prob):
                 skip_easy_count += 1
+                self.skipped_this_step.append(pool[idx : idx + 1])
                 continue
 
             if self._skip_hard_prompts(prompt, base_prob=hard_base_prob):
                 skip_hard_count += 1
+                self.skipped_this_step.append(pool[idx : idx + 1])
                 continue
 
             selected_indices.append(idx)
@@ -383,6 +387,43 @@ class DifficultyOnlyScheduler(Scheduler):
         self.last_stats.considered += prompt_pt
 
         return pool[selected_indices]
+
+    def dead_streak_length(self, prompt_id: str) -> int:
+        streak = 0
+        for record in reversed(self.data[prompt_id]):
+            reward = record["reward"]
+            if not (
+                reward >= self.EASY_SKIP_PROBABILITY_THRESHOLD
+                or reward <= self.HARD_SKIP_PROBABILITY_THRESHOLD
+            ):
+                break
+            streak += 1
+        return streak
+
+
+    def top_up(self, count: int, exclude_prompt_ids: set[str]) -> TensorDict:
+        ranked = sorted(
+            self.skipped_this_step,
+            key=lambda row: self.dead_streak_length(row[0]["prompt_id"]),
+        )
+        chosen = []
+        used_ids = set(exclude_prompt_ids)
+
+        for row in ranked:
+            prompt_id = row[0]["prompt_id"]
+            if prompt_id in used_ids:
+                continue
+            chosen.append(row)
+            used_ids.add(prompt_id)
+            if len(chosen) == count:
+                break
+
+        if len(chosen) < count:
+            raise RuntimeError(
+                f"Need {count} top-up prompts, but only found "
+                f"{len(chosen)} distinct skipped prompts"
+            )
+        return torch.cat(chosen, dim=0)
 
     def reorder(self, prompts):
         print(f"[{self.name}] reordering prompts (Fall through).")
