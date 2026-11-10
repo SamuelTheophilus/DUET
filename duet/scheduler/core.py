@@ -175,35 +175,73 @@ class NoOpScheduler(Scheduler):
 class LengthOnlyScheduler(Scheduler):
     name: str = "length_only"
 
-    def __init__(self, dir: Path | None = None):
+    def __init__(
+        self, 
+        dir: Path | None = None,
+        order: str = "longest"
+    ):
         self.last_stats: SelectPromptStats | None = SelectPromptStats()
-        # self.data = defaultdict(list)
         self.data = load_streak_history(dir)
         self.global_mean_response_length = 800.0
         self.ewma_alpha = 0.3
+
+        if order not in { "longest", "shortest" }:
+            raise ValueError(f"Unknown order provided: {order}")
+
+        self.order = order
 
     def select_prompts(self, pool, batch_size, **kwargs):
         print(f"[{self.name}] filtering prompts. (Fall through).")
         return super().select_prompts(pool, batch_size, **kwargs)
 
+
     def reorder(self, prompts: TensorDict) -> TensorDict:
         """
-        Reorder the prompts based on the predicted lengths.
-        Reordering returns a list of 'mini-batches', where each batch in this list will complete
-        an entire step (rollout, reward-calc, advantage-calc, training) in the GRPO step.
-        This introduces some off-policy-ness and uses KL-penalty adjustment.
+        Reorder prompts by historical EWMA response length.
+        Supports longest-first and shortest-first ordering.
         """
-        return super().reorder(prompts)
-        # print(f"[{self.name}] reordering prompts")
-        # indices = sorted(
-        #     # Sorting this way returns the position of the indicies which can be used to "reshuffle"
-        #     # the prompts in this manner: prompts[indices]. Doing it this way to preserve the output as a
-        #     # TensorDict and not a list.
-        #     range(len(prompts)),
-        #     key=lambda i: prompts[i]["extra_info"].get("Predicted_response_length", 0),
-        # )
-        #
-        # return prompts[indices]
+        print(f"[{self.name}] reordering prompts by predicted length")
+
+        predicted_lengths = [
+            self._bucket_weight(prompts[i:i+1])
+            for i in range(prompts)
+        ]
+
+        prompts["duet_predicted_ewma_length"] = torch.tensor(
+            predicted_lengths,
+            dtype=prompts.dtype,
+            device=prompts.device
+        )
+
+        indices = sorted(
+            range(len(prompts)),
+            key=lambda i: predicted_lengths[i],
+            reverse=(self.order == "longest")
+
+        )
+        ordered = prompts[indices]
+        try:
+                step = ordered[0]["global_steps"]
+                if hasattr(step, "item"):
+                    step = step.item()
+
+                log_dir = Path(os.environ["DUET_RUN_DIR"]) / "predicted_lengths"
+                log_dir.mkdir(parents=True, exist_ok=True)
+
+                with (log_dir / f"{step}.jsonl").open("w") as f:
+                    for rank, idx in enumerate(indices):
+                        record = {
+                            "step": int(step),
+                            "prompt_id": str(prompts[idx]["prompt_id"]),
+                            "predicted_length": float(predicted_lengths[idx]),
+                            "dispatch_rank": rank,
+                        }
+                        f.write(json.dumps(record) + "\n")
+        except Exception as error:
+            print(f"Error occured while trying to log the predicted-lengths {str(error)}")
+            pass
+
+        return prompts[indices]
 
     def pack(self, prompts, pack_size):
         print(f"[{self.name}] packing prompts into mini-batches of size {pack_size}")
@@ -230,42 +268,82 @@ class LengthOnlyScheduler(Scheduler):
         with (streak_dir / f"{step}.json").open("w") as f:
             json.dump(self.data, f)
 
-
+    #
+    # def assign(
+    #     self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
+    # ):
+    #     """
+    #     Assigning buckets to workers using LPT/Round-robin schedulling.
+    #     """
+    #
+    #     weight_per_worker = [0 for _ in range(num_workers)]
+    #
+    #     bucket_weights = [(bucket, self._bucket_weight(bucket)) for bucket in buckets]
+    #
+    #     bucket_weights.sort(key=lambda x: x[1], reverse=True)
+    #
+    #     assigned_buckets: list[TensorDict] = []
+    #
+    #     if schedulling_type == "lpt":
+    #         for bucket, weight in bucket_weights:
+    #             min_idx = weight_per_worker.index(min(weight_per_worker))
+    #
+    #             bucket["assign_to_worker"] = torch.full(
+    #                 bucket.batch_size, min_idx, dtype=torch.long, device=bucket.device
+    #             )
+    #             assigned_buckets.append(bucket)
+    #
+    #             weight_per_worker[min_idx] = weight_per_worker[min_idx] + weight
+    #     else:
+    #         # Default round robin schedulling
+    #         for idx, (bucket, _) in enumerate(bucket_weights):
+    #             worker_id = idx % num_workers
+    #             bucket["assign_to_worker"] = torch.full(
+    #                 bucket.batch_size, worker_id, dtype=torch.long, device=bucket.device
+    #             )
+    #             assigned_buckets.append(bucket)
+    #
+    #     return torch.cat(assigned_buckets, dim=0)
+    
     def assign(
-        self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
+        self,
+        buckets: list[TensorDict],
+        num_workers: int,
+        schedulling_type: str = "lpt",
     ):
         """
-        Assigning buckets to workers using LPT/Round-robin schedulling.
+        Allocate buckets to workers using LPT or round-robin,
+        while preserving their dispatch order.
         """
 
-        weight_per_worker = [0 for _ in range(num_workers)]
+        weight_per_worker = [0.0] * num_workers
+        weights = [self._bucket_weight(bucket) for bucket in buckets ]
 
-        bucket_weights = [(bucket, self._bucket_weight(bucket)) for bucket in buckets]
+        # Use descending weight order for worker allocation.
+        allocation_order = sorted( range(len(weights)), key=lambda i: weights[i], reverse=True)
 
-        bucket_weights.sort(key=lambda x: x[1], reverse=True)
+        for rank, idx in enumerate(allocation_order):
+            bucket = buckets[idx]
+            weight = weights[idx]
 
-        assigned_buckets = []
-
-        if schedulling_type == "lpt":
-            for bucket, weight in bucket_weights:
-                min_idx = weight_per_worker.index(min(weight_per_worker))
-
-                bucket["assign_to_worker"] = torch.full(
-                    bucket.batch_size, min_idx, dtype=torch.long, device=bucket.device
+            if schedulling_type == "lpt":
+                worker_id = weight_per_worker.index(
+                    min(weight_per_worker)
                 )
-                assigned_buckets.append(bucket)
+            else:
+                worker_id = rank % num_workers
 
-                weight_per_worker[min_idx] = weight_per_worker[min_idx] + weight
-        else:
-            # Default round robin schedulling
-            for idx, (bucket, _) in enumerate(bucket_weights):
-                worker_id = idx % num_workers
-                bucket["assign_to_worker"] = torch.full(
-                    bucket.batch_size, worker_id, dtype=torch.long, device=bucket.device
-                )
-                assigned_buckets.append(bucket)
+            bucket["assign_to_worker"] = torch.full(
+                bucket.batch_size,
+                worker_id,
+                dtype=torch.long,
+                device=bucket.device,
+            )
 
-        return torch.cat(assigned_buckets, dim=0)
+            weight_per_worker[worker_id] += weight
+
+        # Preserve the ordering established by reorder() + pack().
+        return torch.cat(buckets, dim=0)
 
 
     def _bucket_weight(self, bucket: TensorDict) -> float:
@@ -544,6 +622,7 @@ class DifficultyOnlyScheduler(Scheduler):
         # return super().assign(buckets, num_workers)
 
 
+
 class JointScheduler(Scheduler):
     name: str = "joint"
 
@@ -567,7 +646,6 @@ class JointScheduler(Scheduler):
 
     def save_history(self, step: int) -> None:
         self.difficulty_scheduler.save_history(step)
-
 
     def assign(
         self, buckets: list[TensorDict], num_workers: int, schedulling_type: str = "lpt"
