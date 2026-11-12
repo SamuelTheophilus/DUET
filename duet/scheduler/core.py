@@ -43,7 +43,7 @@ class Scheduler(ABC):
         return pool[:batch_size]
 
     @abstractmethod
-    def reorder(self, prompts):
+    def reorder(self, prompts, step: int):
         """
         Reorder selected prompts before batching.
         This may include arranging by difficulty, length, or both.
@@ -123,9 +123,9 @@ class NoOpScheduler(Scheduler):
         print("[NoOpScheduler]: selecting prompts")
         return super().select_prompts(pool, batch_size, **kwargs)
 
-    def reorder(self, prompts):
+    def reorder(self, prompts, step):
         print("[NoOpScheduler]: reordering prompts")
-        return super().reorder(prompts)
+        return super().reorder(prompts, step)
 
     def pack(self, prompts, pack_size: int):
         print("[NoOpScheduler]: packing prompts")
@@ -197,7 +197,7 @@ class LengthOnlyScheduler(Scheduler):
         return super().select_prompts(pool, batch_size, **kwargs)
 
 
-    def reorder(self, prompts: TensorDict) -> TensorDict:
+    def reorder(self, prompts: TensorDict, step: int) -> TensorDict:
         """
         Reorder prompts by historical EWMA response length.
         Supports longest-first and shortest-first ordering.
@@ -223,10 +223,6 @@ class LengthOnlyScheduler(Scheduler):
         )
         ordered = prompts[indices]
         try:
-                step = ordered[0]["global_steps"]
-                if hasattr(step, "item"):
-                    step = step.item()
-
                 log_dir = Path(os.environ["DUET_RUN_DIR"]) / "predicted_lengths"
                 log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -243,7 +239,7 @@ class LengthOnlyScheduler(Scheduler):
             print(f"Error occured while trying to log the predicted-lengths {str(error)}")
             pass
 
-        return prompts[indices]
+        return ordered
 
     def pack(self, prompts, pack_size):
         print(f"[{self.name}] packing prompts into mini-batches of size {pack_size}")
@@ -505,9 +501,9 @@ class DifficultyOnlyScheduler(Scheduler):
             )
         return torch.cat(chosen, dim=0)
 
-    def reorder(self, prompts):
+    def reorder(self, prompts, step: int):
         print(f"[{self.name}] reordering prompts (Fall through).")
-        return super().reorder(prompts)
+        return super().reorder(prompts, step)
 
     def pack(self, prompts, pack_size):
         print(f"[{self.name}] packing prompts")
@@ -636,8 +632,8 @@ class JointScheduler(Scheduler):
     def select_prompts(self, pool, batch_size, **kwargs):
         return self.difficulty_scheduler.select_prompts(pool, batch_size, **kwargs)
 
-    def reorder(self, prompts):
-        return self.length_scheduler.reorder(prompts)
+    def reorder(self, prompts, step):
+        return self.length_scheduler.reorder(prompts, step)
 
     def pack(self, prompts, pack_size):
         return super().pack(prompts, pack_size)

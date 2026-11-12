@@ -28,15 +28,18 @@ def log_phase(phase: str):
 
 class DuetVLLMLogger(StatLoggerBase):
     def __init__(self, vllm_config, engine_index=0):
-        print(f"[DUET] DuetVLLMLogger loaded engine={engine_index}", flush=True)
+        print(
+            f"[DUET] DuetVLLMLogger loaded engine={engine_index}",
+            flush=True,
+        )
+
         self.engine_index = engine_index
 
         run_dir = Path(os.environ["DUET_RUN_DIR"])
         run_dir.mkdir(parents=True, exist_ok=True)
 
         self.path = run_dir / "vllm_metrics.jsonl"
-        if self.path.exists():
-            self.path.unlink()
+        self.request_path = run_dir / "vllm_request_stats.jsonl"
 
     def record(
         self,
@@ -46,6 +49,35 @@ class DuetVLLMLogger(StatLoggerBase):
         engine_idx=0,
     ):
         try:
+            # Log finished requests and preemptions
+            if iteration_stats is not None:
+                with self.request_path.open("a") as f:
+                    for fr in iteration_stats.finished_requests:
+                        f.write(json.dumps({
+                            "timestamp_ns": time.time_ns(),
+                            "engine_index": engine_idx,
+                            "type": "finished",
+                            "queued_s": fr.queued_time,
+                            "gen_tokens": fr.num_generation_tokens,
+                            "prompt_tokens": fr.num_prompt_tokens,
+                            "e2e_s": fr.e2e_latency,
+                        }) + "\n")
+
+                    n_pre = getattr(
+                        iteration_stats,
+                        "num_preempted_reqs",
+                        None,
+                    )
+
+                    if n_pre:
+                        f.write(json.dumps({
+                            "timestamp_ns": time.time_ns(),
+                            "engine_index": engine_idx,
+                            "type": "preempted",
+                            "n": n_pre,
+                        }) + "\n")
+
+            # Log existing scheduler metrics
             if scheduler_stats is None:
                 return
 
@@ -68,4 +100,64 @@ class DuetVLLMLogger(StatLoggerBase):
 
     def log_engine_initialized(self):
         pass
+
+
+# class DuetVLLMLogger(StatLoggerBase):
+#     def __init__(self, vllm_config, engine_index=0):
+#         print(f"[DUET] DuetVLLMLogger loaded engine={engine_index}", flush=True)
+#         self.engine_index = engine_index
+#
+#         run_dir = Path(os.environ["DUET_RUN_DIR"])
+#         run_dir.mkdir(parents=True, exist_ok=True)
+#
+#         self.path = run_dir / "vllm_metrics.jsonl"
+#         if self.path.exists():
+#             self.path.unlink()
+#
+#     def record(
+#         self,
+#         scheduler_stats,
+#         iteration_stats,
+#         mm_cache_stats=None,
+#         engine_idx=0,
+#     ):
+#         try:
+#             if scheduler_stats is None:
+#                 return
+#
+#             row = {
+#                 "timestamp_ns": time.time_ns(),
+#                 "engine_index": engine_idx,
+#                 "running": scheduler_stats.num_running_reqs,
+#                 "waiting": scheduler_stats.num_waiting_reqs,
+#                 "kv_cache_usage": scheduler_stats.kv_cache_usage,
+#             }
+#
+#             with self.path.open("a") as f:
+#                 f.write(json.dumps(row) + "\n")
+#
+#         except Exception as e:
+#             print(
+#                 f"[DUET] vLLM metrics logger error: {e}",
+#                 flush=True,
+#             )
+#
+#         if iteration_stats is not None:
+#             with self.path.open("a") as f:
+#                 for fr in iteration_stats.finished_requests:
+#                     f.write(json.dumps({
+#                         "timestamp_ns": time.time_ns(),
+#                         "type": "finished",
+#                         "queued_s": fr.queued_time,
+#                         "gen_tokens": fr.num_generation_tokens,
+#                         "prompt_tokens": fr.num_prompt_tokens,
+#                         "e2e_s": fr.e2e_latency,
+#                     }) + "\n")
+#                 n_pre = getattr(iteration_stats, "num_preempted_reqs", None)
+#                 if n_pre:
+#                     f.write(json.dumps({"timestamp_ns": time.time_ns(),
+#                                         "type": "preempted", "n": n_pre}) + "\n")
+#
+#     def log_engine_initialized(self):
+#         pass
 

@@ -122,7 +122,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
                 pool=batch,
                 batch_size=target_size
             )
-            batch = self.scheduler.reorder(batch)
+            batch = self.scheduler.reorder(batch, step=self.global_step)
 
             batch = self.scheduler.pack(batch, pack_size=64)
             batch = self.scheduler.assign(batch, self.num_workers)
