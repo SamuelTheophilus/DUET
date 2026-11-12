@@ -206,12 +206,12 @@ class LengthOnlyScheduler(Scheduler):
 
         predicted_lengths = [
             self._bucket_weight(prompts[i:i+1])
-            for i in range(prompts)
+            for i in range(len(prompts))
         ]
 
         prompts["duet_predicted_ewma_length"] = torch.tensor(
             predicted_lengths,
-            dtype=prompts.dtype,
+            dtype=torch.float32,
             device=prompts.device
         )
 
