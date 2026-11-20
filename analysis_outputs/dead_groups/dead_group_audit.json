@@ -1,0 +1,29 @@
+{
+  "input_files": [
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\1.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\2.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\3.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\4.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\5.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\6.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\7.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\8.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\9.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\10.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\11.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\12.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\13.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\14.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\15.jsonl",
+    "C:\\Users\\waqar\\OneDrive\\Desktop\\Fellowship\\trace_rollout_training_steps\\16.jsonl"
+  ],
+  "groups": 2048,
+  "dead_groups": 608,
+  "dead_pct": 29.6875,
+  "excluded_padding_rows": 0,
+  "rollouts_per_group": [
+    5
+  ],
+  "pearson_batch_index_vs_dead_pct": -0.8624626556118116,
+  "caution": "Batch number comes from filenames; training chronology and causality are not independently verified. Historical r=-0.213 and 36.8% are not reproduced by this script."
+}
