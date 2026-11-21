@@ -187,7 +187,7 @@ class LengthOnlyScheduler(Scheduler):
         self.ewma_alpha = 0.3
 
         order = kwargs.get("order", "longest")
-        if order not in { "longest", "shortest" }:
+        if order not in { "longest", "shortest" , "none"}:
             raise ValueError(f"Unknown order provided: {order}")
 
         self.order = order
@@ -215,12 +215,19 @@ class LengthOnlyScheduler(Scheduler):
             device=prompts.device
         )
 
-        indices = sorted(
-            range(len(prompts)),
-            key=lambda i: predicted_lengths[i],
-            reverse=(self.order == "longest")
+        indices = list(range(len(prompts)))
+        if self.order != "none":
+            indices.sort(
+                key= lambda i: predicted_lengths[i],
+                reverse=(self.order == "longest")
+            )
+            # indices = sorted(
+            #     range(len(prompts)),
+            #     key=lambda i: predicted_lengths[i],
+            #     reverse=(self.order == "longest")
+            #
+            # )
 
-        )
         ordered = prompts[indices]
         try:
                 log_dir = Path(os.environ["DUET_RUN_DIR"]) / "predicted_lengths"
