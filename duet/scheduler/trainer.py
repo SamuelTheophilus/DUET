@@ -49,7 +49,11 @@ class DuetPPOTrainerSync(PPOTrainerSync):
 
             _scheduler_cls = get_scheduler(s)
             if _scheduler_cls:
-                valid_scheduler = _scheduler_cls(self.latest_streak_file)
+                if s == "length_only":
+                    lpt_order: str = self.config.trainer.duet.get("lpt_order", "longest")
+                    valid_scheduler = _scheduler_cls(self.latest_streak_file, order=lpt_order)
+                else:
+                    valid_scheduler = _scheduler_cls(self.latest_streak_file)
                 self.interleave_schedulers.append(valid_scheduler)
                 print("=" * 80)
                 print(f"Appending Scheduler: {valid_scheduler}")
@@ -118,7 +122,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
                 pool=batch,
                 batch_size=target_size
             )
-            batch = self.scheduler.reorder(batch)
+            batch = self.scheduler.reorder(batch, step=self.global_steps)
 
             batch = self.scheduler.pack(batch, pack_size=64)
             batch = self.scheduler.assign(batch, self.num_workers)
@@ -134,7 +138,7 @@ class DuetPPOTrainerSync(PPOTrainerSync):
 
         if self.underfill_policy == "refill":
             batch = self._generate_refill_batch(target_size)
-            batch = self.scheduler.reorder(batch)
+            batch = self.scheduler.reorder(batch, step=self.global_steps)
 
             batch = self.scheduler.pack(batch, pack_size=64)
             batch = self.scheduler.assign(batch, self.num_workers)
