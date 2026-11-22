@@ -1,7 +1,7 @@
-seed,scheduler,training_steps,evaluation_points,final_response_tokens,total_generation_seconds,mean_generation_seconds,min_batch_size,max_batch_size,topup_metric_steps,observed_topups
-7,noop,300,12,427146567,32028.07,106.76,,,0,
-7,refill,300,12,445456036,39823.87,132.75,,,300,6981
-7,shrink,300,12,259428263,21597.11,71.99,148.0,512.0,0,
-90,noop,300,12,429284491,37895.03,126.32,,,0,
-90,refill,300,12,472308287,38217.15,127.39,,,80,6363
-90,shrink,300,12,286063371,20860.53,69.54,162.0,512.0,0,
+seed,scheduler,training_steps,evaluation_points,mean_accuracy_last_four_pct,last_four_eval_steps,run_version_note,final_response_tokens,total_generation_seconds,mean_generation_seconds,min_batch_size,max_batch_size,topup_metric_steps,observed_topups
+7,noop,300,12,86.7134,"225,250,275,300",,427146567,32028.07,106.76,,,0,
+7,refill,300,12,87.8696,"225,250,275,300",,445456036,39823.87,132.75,,,300,6981
+7,shrink,300,12,86.4481,"225,250,275,300",,259428263,21597.11,71.99,148.0,512.0,0,
+90,noop,300,12,86.9409,"225,250,275,300",,429284491,37895.03,126.32,,,0,
+90,refill,300,12,87.5284,"225,250,275,300",mixed-version; top-up only steps 221-300,472308287,38217.15,127.39,,,80,6363
+90,shrink,300,12,86.3343,"225,250,275,300",,286063371,20860.53,69.54,162.0,512.0,0,

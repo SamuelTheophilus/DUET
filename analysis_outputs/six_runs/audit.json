@@ -4,5 +4,11 @@
   ],
   "source_count": 11,
   "per_step_records": 1800,
-  "plot_status": "PNG figures generated"
+  "plot_status": "PNG figures generated",
+  "interpolation_status": "Interpolated CSV and figures generated",
+  "methodology_notes": [
+    "Refill seed 90 is a mixed-version series; top-up begins only at step 221.",
+    "Interpolated crossings are estimates between sparse evaluation points, not observed hits.",
+    "Do not interpret evaluation checkpoint crossings as statistically significant."
+  ]
 }

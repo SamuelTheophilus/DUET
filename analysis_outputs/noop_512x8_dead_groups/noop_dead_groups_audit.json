@@ -1,0 +1,38 @@
+{
+  "coverage": {
+    "90": {
+      "steps": 300,
+      "segments": [
+        [
+          "seed90_original",
+          1,
+          160
+        ],
+        [
+          "seed90_resumed",
+          161,
+          300
+        ]
+      ]
+    },
+    "7": {
+      "steps": 300,
+      "segments": [
+        [
+          "seed7_original",
+          1,
+          200
+        ],
+        [
+          "seed7_resumed",
+          201,
+          300
+        ]
+      ]
+    }
+  },
+  "method": "UID prefix identifies group; binary score; exactly 512 groups and 8 rollouts required per step",
+  "recurrence_definition": "Match exact input text to its previous observed occurrence within the same seed, even across checkpoint segments. Among previously-dead prompts that reappear, count those dead again. Attribute transition to the step of reappearance. Aggregate ratio is denominator-weighted.",
+  "recurrence_caveat": "Exact text matching does not merge paraphrases. Prompts without a previous appearance do not enter the denominator. Distinct prompts with identical text cannot be distinguished; within-step uniqueness is required.",
+  "caveat": "Training reward-group statistics, not validation accuracy. Checkpoint cuts follow the six-run analysis manifest."
+}

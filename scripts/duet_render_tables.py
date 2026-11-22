@@ -61,14 +61,20 @@ def main():
     total_tokens = {}
     summary = []
     for (policy, seed), rows in sorted(grouped.items(), key=lambda x: (x[0][1], x[0][0])):
+        rows = sorted(rows, key=lambda r: int(r["step"]))
         last_tokens = float(rows[-1]["cumulative_response_tokens"] or "nan")
         total_tokens[(policy, seed)] = last_tokens
         generation_sum = sum(float(r["generation_seconds"]) for r in rows if r["generation_seconds"])
         batches = [float(r["batch_size"]) for r in rows if r["batch_size"]]
         topups = [float(r["prompts_topped_up"]) for r in rows if r["prompts_topped_up"]]
+        eval_rows = [r for r in rows if r["accuracy"] not in (None, "")]
+        last_four = eval_rows[-4:]
         summary.append({
             "seed": seed, "scheduler": policy, "training_steps": len(rows),
-            "evaluation_points": sum(bool(r["accuracy"]) for r in rows),
+            "evaluation_points": len(eval_rows),
+            "mean_accuracy_last_four_pct": round(100 * sum(float(r["accuracy"]) for r in last_four) / 4, 4) if len(last_four) == 4 else "",
+            "last_four_eval_steps": ",".join(str(r["step"]) for r in last_four) if len(last_four) == 4 else "",
+            "run_version_note": "mixed-version; top-up only steps 221-300" if policy == "refill" and seed == 90 else "",
             "final_response_tokens": int(last_tokens),
             "total_generation_seconds": round(generation_sum, 2),
             "mean_generation_seconds": round(generation_sum / len(rows), 2),
@@ -103,9 +109,9 @@ def main():
         rows.append([str(seed), policy.title(), str(record["training_steps"]),
                      cell_number(record["final_response_tokens"] / 1e6, 2),
                      cell_number(savings, 1),
-                     cell_number(record["mean_generation_seconds"], 1)])
+                     cell_number(record["mean_accuracy_last_four_pct"], 2)])
     draw_table(directory / "six_runs_summary_table.png", "DUET — six-run comparison at 300 steps",
-               ["Seed", "Scheduler", "Steps", "Resp. tokens (M)", "Savings vs NoOp (%)", "Mean gen (s/step)"],
+               ["Seed", "Scheduler", "Steps", "Resp. tokens (M)", "Savings vs NoOp (%)", "Last 4 evals (%)"],
                rows, [.09, .18, .10, .20, .23, .20])
 
     special_rows = []

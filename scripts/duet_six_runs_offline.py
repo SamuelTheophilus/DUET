@@ -30,7 +30,7 @@ MANIFEST = {
         ("duet1p0", "20261105_201744_noops_300_step_run_seed_7.db", 1, 200),
         ("duet1p0", "20261108_175204_noops_300_step_run_extended_from_seed_7_200_checkpoint.db", 201, 300),
     ],
-        ("refill", 90): [
+    ("refill", 90): [
         ("duet", "20261010_204140_difficulty_only_200_steps.db", 1, 180),
         ("duet", "20261104_111801_difficulty_only_300_steps_extended_from_200_steps.db", 181, 220),
         ("duet", "20261110_104325_difficulty_only_refill_300_steps_extended_from_220_step_checkpoint_seed_90_w_top_up.db", 221, 300),
@@ -55,6 +55,43 @@ KEYS = {
     "prompts_topped_up": ("duet/prompts_topped_up",),
 }
 THRESHOLDS = (0.80, 0.825, 0.85, 0.86)
+INTERPOLATED_TARGETS_PCT = tuple(80 + i * 0.5 for i in range(13))
+
+
+def interpolated_tokens_to_target(run_rows, target_pct):
+    """First interpolated crossing of a target between *observed* evaluations.
+
+    This is a descriptive approximation, not a measured crossing. Uses the
+    running-best envelope so later accuracy dips never move the first hit.
+    No extrapolation beyond the recorded accuracy/token range is performed.
+    """
+    evaluations = sorted(
+        (r for r in run_rows if r["accuracy"] is not None and
+         r["cumulative_response_tokens"] is not None),
+        key=lambda r: r["step"],
+    )
+    if not evaluations:
+        return None
+    target = target_pct / 100
+    previous = None
+    best = -float("inf")
+    for current in evaluations:
+        accuracy = current["accuracy"]
+        if accuracy <= best:
+            continue
+        if accuracy >= target:
+            if previous is None:
+                # First evaluation is already above target: crossing is
+                # left-censored, so an interpolated value is not identified.
+                return None
+            previous_best, previous_tokens = previous
+            fraction = (target - previous_best) / (accuracy - previous_best)
+            return previous_tokens + fraction * (
+                current["cumulative_response_tokens"] - previous_tokens
+            )
+        best = accuracy
+        previous = (accuracy, current["cumulative_response_tokens"])
+    return None
 
 
 def fetch_metrics(db_path: Path):
@@ -185,6 +222,51 @@ def plot_results(rows, folder):
     return "PNG figures generated"
 
 
+def interpolated_curves(rows, folder):
+    curves = []
+    for seed in (7, 90):
+        for target in INTERPOLATED_TARGETS_PCT:
+            values = {}
+            for policy in ("noop", "refill", "shrink"):
+                subset = [r for r in rows if r["seed"] == seed and r["scheduler"] == policy]
+                values[policy] = interpolated_tokens_to_target(subset, target)
+            for policy in ("noop", "refill", "shrink"):
+                value = values[policy]
+                baseline = values["noop"]
+                curves.append({
+                    "seed": seed, "scheduler": policy, "target_accuracy_pct": target,
+                    "interpolated_response_tokens": round(value) if value is not None else None,
+                    "saving_vs_noop_pct": (100 * (1 - value / baseline)
+                                           if value is not None and baseline else None),
+                    "method": "linear_first_hit_running_best_no_extrapolation",
+                    "run_warning": ("mixed_code_versions_not_clean_topup_arm"
+                                    if policy == "refill" and seed == 90 else ""),
+                })
+    write_csv(folder / "tokens_to_target_interpolated.csv", curves, list(curves[0]))
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return "Matplotlib absent; interpolated CSV only"
+    for seed in (7, 90):
+        fig, ax = plt.subplots(figsize=(8.5, 5))
+        for policy in ("noop", "refill", "shrink"):
+            selected = [r for r in curves if r["seed"] == seed and r["scheduler"] == policy
+                        and r["interpolated_response_tokens"] is not None]
+            ax.plot([r["target_accuracy_pct"] for r in selected],
+                    [r["interpolated_response_tokens"] / 1e6 for r in selected],
+                    marker="o", label=("refill (mixed-version)" if policy == "refill" and seed == 90 else policy))
+        ax.set(xlabel="Target GSM8K accuracy (%)", ylabel="Interpolated response tokens (millions)",
+               title=f"Seed {seed}: tokens to target (linear interpolation)")
+        ax.grid(alpha=0.25)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(folder / f"seed{seed}_tokens_to_target_interpolated.png", dpi=180)
+        plt.close(fig)
+    return "Interpolated CSV and figures generated"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", type=Path, default=Path("analysis_inputs"))
@@ -207,7 +289,11 @@ def main():
                                    "accuracy_at_crossing_pct": 100*crossing["accuracy"] if crossing else None})
     write_csv(args.out / "thresholds.csv", thresholds, list(thresholds[0]))
     summary = {"errors_or_warnings": problems, "source_count": len(provenance), "per_step_records": len(rows),
-               "plot_status": plot_results(rows, args.out)}
+               "plot_status": plot_results(rows, args.out),
+               "interpolation_status": interpolated_curves(rows, args.out),
+               "methodology_notes": ["Refill seed 90 is a mixed-version series; top-up begins only at step 221.",
+                                     "Interpolated crossings are estimates between sparse evaluation points, not observed hits.",
+                                     "Do not interpret evaluation checkpoint crossings as statistically significant."]}
     (args.out / "audit.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
     if problems and not args.allow_incomplete:
