@@ -161,6 +161,7 @@ def main():
     args = parser.parse_args()
     records = []
     recurrence = []
+    overlap_records = []
     coverage = {}
     for seed, segments in SEGMENTS.items():
         if not all((args.inputs / name).is_dir() for name, _, _ in segments):
@@ -177,8 +178,28 @@ def main():
         if sorted(selected) != list(range(1, 301)):
             raise ValueError(f"Seed {seed}: incomplete checkpoint-stitched trajectory")
         previous_status = {}
+        previous_prompts = None
         for step, file in sorted(selected.items()):
             row, statuses = summarize_step(seed, step, file)
+            # Compare exact prompt text, not per-rollout UID. Cross checkpoint boundaries.
+            current_prompts = set(statuses)
+            overlap = (len(current_prompts & previous_prompts)
+                       if previous_prompts is not None else None)
+            overlap_records.append({
+                "seed": seed,
+                "step": step,
+                "source_file": str(file),
+                "distinct_prompts_this_step": len(current_prompts),
+                "overlap_with_previous_step": overlap if overlap is not None else "",
+                "overlap_pct_of_512": (100.0 * overlap / 512 if overlap is not None else ""),
+                "new_vs_previous_step": (512 - overlap if overlap is not None else 512),
+                "full_overlap_flag": (overlap == 512),
+                "high_overlap_flag": (overlap is not None and overlap >= 461),
+            })
+            if overlap is not None and overlap >= 461:
+                print(f"WARNING: seed {seed} step {step}: {overlap}/512 "
+                      "prompts also appeared in previous step")
+            previous_prompts = current_prompts
             records.append(row)
             previously_dead_reappeared = 0
             dead_again = 0
@@ -212,6 +233,7 @@ def main():
         parser.error("No complete seed trajectories found")
     args.out.mkdir(parents=True, exist_ok=True)
     write_csv(args.out / "noop_dead_groups_per_step.csv", records)
+    write_csv(args.out / "noop_prompt_overlap_per_step.csv", overlap_records)
     write_csv(args.out / "noop_dead_group_recurrence.csv", recurrence)
     summaries = []
     for seed in sorted({r["seed"] for r in records}):
@@ -225,6 +247,15 @@ def main():
         summary["dead_reappeared_transitions"] = denominator
         summary["dead_again_transitions"] = numerator
         summary["dead_again_pct_next_appearance"] = (100 * numerator / denominator if denominator else "")
+        step_overlaps = [r for r in overlap_records
+                         if r["seed"] == seed and r["step"] > 1]
+        summary["full_prompt_overlap_transitions"] = sum(
+            r["full_overlap_flag"] for r in step_overlaps)
+        summary["high_prompt_overlap_transitions_ge_90pct"] = sum(
+            r["high_overlap_flag"] for r in step_overlaps)
+        summary["mean_adjacent_step_overlap"] = (
+            sum(r["overlap_with_previous_step"] for r in step_overlaps)
+            / len(step_overlaps) if step_overlaps else None)
         summaries.append(summary)
     write_csv(args.out / "noop_dead_groups_summary.csv", summaries)
     audit = {"coverage": coverage,
@@ -232,6 +263,18 @@ def main():
              "recurrence_definition": "Match exact input text to its previous observed occurrence within the same seed, even across checkpoint segments. Among previously-dead prompts that reappear, count those dead again. Attribute transition to the step of reappearance. Aggregate ratio is denominator-weighted.",
              "recurrence_caveat": "Exact text matching does not merge paraphrases. Prompts without a previous appearance do not enter the denominator. Distinct prompts with identical text cannot be distinguished; within-step uniqueness is required.",
              "caveat": "Training reward-group statistics, not validation accuracy. Checkpoint cuts follow the six-run analysis manifest."}
+    audit["prompt_overlap_method"] = (
+        "Count distinct exact prompt texts shared between consecutive "
+        "steps in each checkpoint-stitched seed trajectory. "
+        "Flag >=461/512 as high overlap and 512/512 as full reuse. "
+        "The high-overlap threshold is a diagnostic heuristic, not a statistical test."
+    )
+    audit["prompt_overlap_file"] = "noop_prompt_overlap_per_step.csv"
+    audit["sampling_warning"] = (
+        "High adjacent-step reuse can bias dead-group and recurrence "
+        "interpretations. Inspect all flagged training intervals before "
+        "using results in a paper."
+    )
     (args.out / "noop_dead_groups_audit.json").write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
     plot(records, args.out)
     plot_recurrence(recurrence, args.out)
