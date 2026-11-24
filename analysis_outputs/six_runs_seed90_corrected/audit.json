@@ -1,0 +1,14 @@
+{
+  "errors_or_warnings": [
+    "refill seed 90: prompts_topped_up missing at 220 steps (first: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])"
+  ],
+  "source_count": 12,
+  "per_step_records": 1800,
+  "plot_status": "PNG figures generated",
+  "interpolation_status": "Interpolated CSV and figures generated",
+  "methodology_notes": [
+    "Refill seed 90 is a mixed-version series; top-up begins only at step 221.",
+    "Interpolated crossings are estimates between sparse evaluation points, not observed hits.",
+    "Do not interpret evaluation checkpoint crossings as statistically significant."
+  ]
+}
