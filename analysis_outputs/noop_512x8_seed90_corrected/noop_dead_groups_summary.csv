@@ -1,0 +1,2 @@
+seed,steps,groups_analyzed,mean_easy_dead_pct,mean_hard_dead_pct,mean_productive_pct,mean_dead_total_pct,dead_reappeared_transitions,dead_again_transitions,dead_again_pct_next_appearance,full_prompt_overlap_transitions,high_prompt_overlap_transitions_ge_90pct,mean_adjacent_step_overlap
+90,300,153600,73.16731770833333,2.2063802083333335,24.626302083333332,75.37369791666667,108925,98521,90.44847372044985,0,0,2.4548494983277593
