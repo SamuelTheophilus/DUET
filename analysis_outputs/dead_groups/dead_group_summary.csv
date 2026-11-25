@@ -1,0 +1,5 @@
+period,batches,groups,dead,dead_pct
+all,16,2048,608,29.6875
+batches_1_to_9,9,1152,431,37.413194
+batches_10_to_16,7,896,177,19.754464
+batches_1_to_12,12,1536,510,33.203125

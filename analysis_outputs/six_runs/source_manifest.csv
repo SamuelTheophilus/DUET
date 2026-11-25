@@ -1,0 +1,12 @@
+scheduler,seed,source_db,keep_first_step,keep_last_step
+noop,90,duet\20261011_231637_noops_200_steps.db,1,160
+noop,90,duet\20261104_203623_noops_300_steps_from_160_steps.db,161,300
+noop,7,duet1p0\20261105_201744_noops_300_step_run_seed_7.db,1,200
+noop,7,duet1p0\20261108_175204_noops_300_step_run_extended_from_seed_7_200_checkpoint.db,201,300
+refill,90,duet\20261010_204140_difficulty_only_200_steps.db,1,180
+refill,90,duet\20261104_111801_difficulty_only_300_steps_extended_from_200_steps.db,181,220
+refill,90,duet\20261110_104325_difficulty_only_refill_300_steps_extended_from_220_step_checkpoint_seed_90_w_top_up.db,221,300
+refill,7,duet1p0\20261110_103252_difficulty_only_refill_run_300_step_seed_7.db,1,160
+refill,7,duet1p0\20261111_132534_difficulty_only_refill_run_300_step_seed_7_resuming_from_checkpoint_160.db,161,300
+shrink,90,duet1p0\20261104_114414_difficulty_only_shrink_300_steps_seed_90.db,1,300
+shrink,7,duet1p0\20261112_123508_difficulty_only_shrink_300_steps_seed_7.db,1,300

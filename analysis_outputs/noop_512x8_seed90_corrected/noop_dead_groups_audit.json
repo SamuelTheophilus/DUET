@@ -1,0 +1,21 @@
+{
+  "coverage": {
+    "90": {
+      "steps": 300,
+      "segments": [
+        [
+          "seed90_corrected_300",
+          1,
+          300
+        ]
+      ]
+    }
+  },
+  "method": "UID prefix identifies group; binary score; exactly 512 groups and 8 rollouts required per step",
+  "recurrence_definition": "Match exact input text to its previous observed occurrence within the same seed, even across checkpoint segments. Among previously-dead prompts that reappear, count those dead again. Attribute transition to the step of reappearance. Aggregate ratio is denominator-weighted.",
+  "recurrence_caveat": "Exact text matching does not merge paraphrases. Prompts without a previous appearance do not enter the denominator. Distinct prompts with identical text cannot be distinguished; within-step uniqueness is required.",
+  "caveat": "Training reward-group statistics, not validation accuracy. Checkpoint cuts follow the six-run analysis manifest.",
+  "prompt_overlap_method": "Count distinct exact prompt texts shared between consecutive steps in each checkpoint-stitched seed trajectory. Flag >=461/512 as high overlap and 512/512 as full reuse. The high-overlap threshold is a diagnostic heuristic, not a statistical test.",
+  "prompt_overlap_file": "noop_prompt_overlap_per_step.csv",
+  "sampling_warning": "High adjacent-step reuse can bias dead-group and recurrence interpretations. Inspect all flagged training intervals before using results in a paper."
+}
